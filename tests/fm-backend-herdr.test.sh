@@ -3826,7 +3826,7 @@ test_capture_never_issues_text_recent_read() {
   while IFS= read -r line; do
     case "$line" in *$'\x1f''read'$'\x1f'*) ;; *) continue ;; esac
     case "$line" in *$'\x1f''--source'$'\x1f''visible'*|*$'\x1f''--source'$'\x1f''detection'*) continue ;; esac
-    case "$line" in *$'\x1f''--format'$'\x1f''ansi'*|*$'\x1f''--ansi'*) continue ;; esac
+    case "$line" in *$'\x1f''--format'$'\x1f''ansi'*) continue ;; esac
     offending="$offending${line//$'\x1f'/ }"$'\n'
   done < "$log"
   [ -z "$offending" ] || fail "a capture path issued a text recent read, which wheel-scrolls an idle fullscreen agent: $offending"
@@ -3850,15 +3850,36 @@ test_capture_works_around_small_lines_bug() {
   pass "fm_backend_herdr_capture: works around the verified small-N '--lines' bug by over-fetching and trimming locally"
 }
 
+test_capture_falls_back_to_text_read_when_ansi_read_fails() {
+  local dir log resp fb out reads line
+  dir="$TMP_ROOT/capture-ansi-fallback"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '1\n' > "$resp/1.exit"
+  printf 'a\nb\nc\nd\ne\n' > "$resp/2.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_capture default:w1:p2 2' "$ROOT" )
+  expect_code 0 $? "capture should succeed through the text fallback"
+  [ "$out" = $'d\ne' ] || fail "the text fallback should return the last N lines, got '$out'"
+  reads=$(grep $'\x1f''read'$'\x1f' "$log")
+  [ "$(printf '%s\n' "$reads" | wc -l | tr -d ' ')" = 2 ] || fail "expected one ANSI read then one text read, got: ${reads//$'\x1f'/ }"
+  line=$(printf '%s\n' "$reads" | sed -n 2p)
+  case "$line" in
+    *$'\x1f''--format'$'\x1f'*) fail "the fallback read should be text, got: ${line//$'\x1f'/ }" ;;
+    "HERDR_SESSION=default"$'\x1f''pane'$'\x1f''read'$'\x1f''w1:p2'$'\x1f''--source'$'\x1f''recent'$'\x1f''--lines'$'\x1f''200'*) ;;
+    *) fail "the fallback should be the over-fetching recent read, got: ${line//$'\x1f'/ }" ;;
+  esac
+  pass "fm_backend_herdr_capture: falls back to the over-fetching text read when the ANSI read fails"
+}
+
 test_capture_preserves_pane_read_failure() {
   local dir log resp fb out status
   dir="$TMP_ROOT/capture-fail"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
-  printf '1\n' > "$resp/1.exit"
+  printf '1\n' > "$resp/1.exit"; printf '1\n' > "$resp/2.exit"
   fb=$(make_herdr_fakebin "$dir")
   out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
     bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_capture default:w1:p2 2' "$ROOT" 2>&1 )
   status=$?
-  [ "$status" -ne 0 ] || fail "capture should fail when pane read fails, got output '$out'"
+  [ "$status" -ne 0 ] || fail "capture should fail when both the ANSI and the text pane read fail, got output '$out'"
   assert_contains "$(cat "$log")" "HERDR_SESSION=default"$'\x1f''status'$'\x1f''--json' \
     "capture did not ensure the herdr server before reading the pane"
   assert_contains "$(cat "$log")" $'\x1f''pane'$'\x1f''read'$'\x1f''w1:p2' \
@@ -6113,6 +6134,7 @@ test_normalize_key
 test_capture_calls_pane_read
 test_capture_never_issues_text_recent_read
 test_capture_works_around_small_lines_bug
+test_capture_falls_back_to_text_read_when_ansi_read_fails
 test_capture_preserves_pane_read_failure
 test_send_key_normalizes_and_targets_pane
 test_kill_is_best_effort
