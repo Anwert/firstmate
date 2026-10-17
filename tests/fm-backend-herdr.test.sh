@@ -3792,9 +3792,45 @@ test_capture_calls_pane_read() {
   out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
     bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_capture default:w1:p2 250' "$ROOT" )
   [ "$out" = $'line one\nline two\nline three' ] || fail "capture did not pass through pane read output, got '$out'"
-  assert_contains "$(cat "$log")" "HERDR_SESSION=default"$'\x1f''pane'$'\x1f''read'$'\x1f''w1:p2'$'\x1f''--source'$'\x1f''recent'$'\x1f''--lines'$'\x1f''250' \
-    "capture did not call pane read with the right pane id and line bound"
-  pass "fm_backend_herdr_capture: calls 'pane read <pane> --source recent --lines N' with the session set"
+  assert_contains "$(cat "$log")" "HERDR_SESSION=default"$'\x1f''pane'$'\x1f''read'$'\x1f''w1:p2'$'\x1f''--source'$'\x1f''recent'$'\x1f''--lines'$'\x1f''250'$'\x1f''--format'$'\x1f''ansi' \
+    "capture did not call pane read with the right pane id, line bound and ANSI format"
+  pass "fm_backend_herdr_capture: calls 'pane read <pane> --source recent --lines N --format ansi' with the session set"
+}
+
+# A TEXT recent read longer than the viewport makes Herdr (0.8.0+) wheel-scroll
+# an idle fullscreen agent to harvest history, which visibly twitches the pane
+# (herdrdev/herdr #5196, #2669). Every read the capture paths issue must be
+# visible-sourced or ANSI, and the ANSI styling, CRLF line ends and trailing
+# blank cells must not leak to callers expecting plain text.
+test_capture_never_issues_text_recent_read() {
+  local dir log resp fb out i bound line esc nbsp offending
+  dir="$TMP_ROOT/capture-no-text-recent"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  esc=$(printf '\033'); nbsp=$(printf '\302\240')
+  for i in 1 2 3 4 5 6 7; do
+    printf '%s[1mhead%s[0m  \r\nmid%s[38;2;1;2;3mdle%s[0m\r\n\xe2\x9d\xaf%s\r\ntail' "$esc" "$esc" "$esc" "$esc" "$nbsp" > "$resp/$i.out"
+  done
+  fb=$(make_herdr_fakebin "$dir")
+  for bound in 1 3 40 200 500 ''; do
+    out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+      bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_capture default:w1:p2 "$1"' "$ROOT" "$bound" )
+    case "$bound" in
+      1) [ "$out" = 'tail' ] || fail "capture bound 1 should return the stripped last line, got '$out'" ;;
+      3) [ "$out" = $'middle\n\xe2\x9d\xaf\ntail' ] || fail "capture bound 3 should return stripped plain text, got '$out'" ;;
+      *) [ "$out" = $'head\nmiddle\n\xe2\x9d\xaf\ntail' ] || fail "capture bound '$bound' should return stripped plain text, got '$out'" ;;
+    esac
+  done
+  PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_visible_capture default:w1:p2; fm_backend_herdr_visible_capture_ansi default:w1:p2' "$ROOT" >/dev/null 2>&1 || true
+  grep -q $'\x1f''read'$'\x1f' "$log" || fail "the capture paths issued no pane read at all, so the text-recent check would be vacuous"
+  offending=""
+  while IFS= read -r line; do
+    case "$line" in *$'\x1f''read'$'\x1f'*) ;; *) continue ;; esac
+    case "$line" in *$'\x1f''--source'$'\x1f''visible'*|*$'\x1f''--source'$'\x1f''detection'*) continue ;; esac
+    case "$line" in *$'\x1f''--format'$'\x1f''ansi'*|*$'\x1f''--ansi'*) continue ;; esac
+    offending="$offending${line//$'\x1f'/ }"$'\n'
+  done < "$log"
+  [ -z "$offending" ] || fail "a capture path issued a text recent read, which wheel-scrolls an idle fullscreen agent: $offending"
+  pass "fm_backend_herdr_capture: never issues a text recent read and returns plain text"
 }
 
 test_capture_works_around_small_lines_bug() {
@@ -6075,6 +6111,7 @@ test_list_live_scoped_to_this_homes_workspace_only
 test_parse_target
 test_normalize_key
 test_capture_calls_pane_read
+test_capture_never_issues_text_recent_read
 test_capture_works_around_small_lines_bug
 test_capture_preserves_pane_read_failure
 test_send_key_normalizes_and_targets_pane
