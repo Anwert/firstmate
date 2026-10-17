@@ -3161,7 +3161,9 @@ fm_backend_herdr_send_key() {  # <target> <key>
 # as intended). ANSI reads never start that harvest, and on a normal-screen
 # pane they return the same scrollback tail. The styling is stripped here, plus
 # the CRLF line ends and the trailing blank cells (ASCII space and NBSP) the
-# text renderer drops, so callers see what a text read printed.
+# text renderer drops, so callers see what a text read printed. A client whose
+# ANSI read fails falls back to the text read; the harvest only exists on
+# 0.8.0+, where ANSI reads are verified, so the fallback cannot twitch a pane.
 #
 # Verified CLI quirk (herdr-verification-p2.md "pane read --lines bug", v0.7.1):
 # `pane read --source recent --lines N` returns COMPLETELY EMPTY output when N
@@ -3176,9 +3178,13 @@ fm_backend_herdr_capture() {  # <target> <lines>
   case "$lines" in ''|*[!0-9]*) lines=200 ;; esac
   fetch=$lines
   case "$fetch" in ''|*[!0-9]*) fetch=200 ;; *) [ "$fetch" -ge 200 ] || fetch=200 ;; esac
-  out=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane read "$FM_BACKEND_HERDR_PANE" --source recent --lines "$fetch" --format ansi 2>/dev/null) || return 1
-  cr=$(printf '\r'); nbsp=$(printf '\302\240')
-  printf '%s' "$out" | fm_composer_strip_ansi | LC_ALL=C sed -E "s/${cr}\$//; s/( |${nbsp})+\$//" | tail -n "$lines"
+  if out=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane read "$FM_BACKEND_HERDR_PANE" --source recent --lines "$fetch" --format ansi 2>/dev/null); then
+    cr=$(printf '\r'); nbsp=$(printf '\302\240')
+    printf '%s' "$out" | fm_composer_strip_ansi | LC_ALL=C sed -E "s/${cr}\$//; s/( |${nbsp})+\$//" | tail -n "$lines"
+    return 0
+  fi
+  out=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane read "$FM_BACKEND_HERDR_PANE" --source recent --lines "$fetch" 2>/dev/null) || return 1
+  printf '%s' "$out" | tail -n "$lines"
 }
 
 # fm_backend_herdr_visible_capture: the visible viewport only. `--source
