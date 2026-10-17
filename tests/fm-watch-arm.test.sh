@@ -1296,7 +1296,12 @@ SH
   cat > "$dir/reader" <<SH
 #!/usr/bin/env bash
 printf '@subscribed\n'
-if mv "$dir/slow" "$dir/slow.claimed" 2>/dev/null; then sleep 8; else sleep "\$2"; fi
+if mv "$dir/slow" "$dir/slow.claimed" 2>/dev/null; then
+  i=0
+  while [ ! -e "$dir/release" ] && [ "\$i" -lt 600 ]; do sleep 0.1; i=\$((i + 1)); done
+else
+  sleep "\$2"
+fi
 SH
   chmod +x "$fakebin/herdr" "$dir/reader"
   fm_write_meta "$state/tk1.meta" "window=sess:wG:pQ" "backend=herdr" "kind=ship"
@@ -1322,6 +1327,7 @@ SH
     sleep 0.05
     i=$((i + 1))
   done
+  touch "$dir/release"
   grep -q '^watcher: started pid=' "$armout" \
     || fail "--take-over did not own a fresh cycle after a late stop: $(cat "$armout")"
   grep -q 'reason=taken-over	' "$state/.watch-cycle-exits.log" \
