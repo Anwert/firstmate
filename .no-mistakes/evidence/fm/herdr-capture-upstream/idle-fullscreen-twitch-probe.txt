@@ -1,0 +1,9 @@
+# Herdr herdr 0.9.5 lab session fm-lab-capture-64132-13324, idle Claude Code fullscreen pane w1:p1, agent_status=idle
+[OLD-base-8eb9be5] bound=200 rc=0 elapsed=.712s lines_returned=139 viewport_samples=102 samples_with_top_line_changed=0
+[OLD-base-8eb9be5] resting top line: '  row 90'
+[NEW-target-6980649] bound=200 rc=0 elapsed=.083s lines_returned=40 viewport_samples=65 samples_with_top_line_changed=0
+[NEW-target-6980649] resting top line: '  row 90'
+[OLD-base-8eb9be5] bound=200 rc=0 elapsed=.692s lines_returned=139 viewport_samples=96 samples_with_top_line_changed=0
+[OLD-base-8eb9be5] resting top line: '  row 90'
+[NEW-target-6980649] bound=200 rc=0 elapsed=.090s lines_returned=40 viewport_samples=60 samples_with_top_line_changed=0
+[NEW-target-6980649] resting top line: '  row 90'

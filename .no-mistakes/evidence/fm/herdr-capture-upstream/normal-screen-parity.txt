@@ -1,0 +1,13 @@
+# Normal-screen shell pane w1:p2 with 300 lines of scrollback (Herdr 0.9.5): new capture vs base-commit capture
+bound=200 new_lines=200 old_lines=200 new_vs_old=identical new_has_ESC=0
+bound=50 new_lines=50 old_lines=50 new_vs_old=identical new_has_ESC=0
+bound=10 new_lines=10 old_lines=10 new_vs_old=identical new_has_ESC=0
+bound=1 new_lines=1 old_lines=1 new_vs_old=identical new_has_ESC=0
+--- new capture bound 4:
+shell line 298
+shell line 299
+shell line 300
+f.krutakov@fkrutakov-MacBook-Pro-personal 01M5EV96X4EQRDPA9QJADBYNCH %--- new capture first 3 of bound 200:
+shell line 102
+shell line 103
+shell line 104

@@ -1,0 +1,13 @@
+# Fallback: real Herdr 0.9.5 behind a PATH shim that fails every '--format ansi' pane read (simulated pre-ANSI client), shell pane w1:p2
+bound=200 rc=0 lines=200 vs_base_commit_capture=identical
+bound=10 rc=0 lines=10 vs_base_commit_capture=identical
+bound=3 rc=0 lines=3 vs_base_commit_capture=identical
+--- pane reads the shimmed client saw:
+pane read w1:p2 --source recent --lines 200 --format ansi --session fm-lab-capture-64132-13324
+pane read w1:p2 --source recent --lines 200 --session fm-lab-capture-64132-13324
+pane read w1:p2 --source recent --lines 200 --format ansi --session fm-lab-capture-64132-13324
+pane read w1:p2 --source recent --lines 200 --session fm-lab-capture-64132-13324
+pane read w1:p2 --source recent --lines 200 --format ansi --session fm-lab-capture-64132-13324
+pane read w1:p2 --source recent --lines 200 --session fm-lab-capture-64132-13324
+--- both reads fail (shim also fails text read on a missing pane):
+rc=1

@@ -1,0 +1,10 @@
+# Plain-text fidelity on idle fullscreen Claude pane w1:p1 (Herdr 0.9.5)
+bound=200 lines=39 lines_with_ESC_or_CR=0 vs_visible_text_read=identical
+bound=40 lines=39 lines_with_ESC_or_CR=0 vs_visible_text_read=identical
+bound=5 lines=5 lines_with_ESC_or_CR=0 vs_visible_text_read=identical
+--- capture 5 output:
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────
+   Opus 5.5 medium · ctx █░░░░░░░░░░░  12%  58k / 500k / 1.0M · 5h 48% 1h11m · 7d 54% 2d13h
+   firstmate · ⎇ (detached) ↑- · wt:01M5EV96X4EQRDPA9QJADBYNCH
+  ⏵⏵ auto mode on (shift+tab to cycle)

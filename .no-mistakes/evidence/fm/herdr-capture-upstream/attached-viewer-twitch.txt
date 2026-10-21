@@ -1,0 +1,8 @@
+# Herdr herdr 0.9.5, lab fm-lab-capture-64132-13324, real Claude Code fullscreen idle in w1:p1, one attached 40x120 viewer recording its pty stream
+{"agent":"claude","agent_status":"idle"}
+[OLD-base-8eb9be5] capture took 0.836s, returned 139 lines; viewer received 25 redraw chunks / 11221 bytes in the read window (+1.5s); 'row N' redrawn: 14 distinct, of which scrolled-off rows <90 (only visible if the pane scrolled up): 11 range 20..30
+[NEW-target-6980649] capture took 0.195s, returned 38 lines; viewer received 0 redraw chunks / 0 bytes in the read window (+1.5s); 'row N' redrawn: 0 distinct, of which scrolled-off rows <90 (only visible if the pane scrolled up): 0
+[OLD-base-8eb9be5] capture took 0.852s, returned 139 lines; viewer received 28 redraw chunks / 11945 bytes in the read window (+1.5s); 'row N' redrawn: 14 distinct, of which scrolled-off rows <90 (only visible if the pane scrolled up): 11 range 20..30
+[NEW-target-6980649] capture took 0.088s, returned 38 lines; viewer received 0 redraw chunks / 0 bytes in the read window (+1.5s); 'row N' redrawn: 0 distinct, of which scrolled-off rows <90 (only visible if the pane scrolled up): 0
+[OLD-base-8eb9be5] capture took 3.387s, returned 139 lines; viewer received 41 redraw chunks / 17279 bytes in the read window (+1.5s); 'row N' redrawn: 14 distinct, of which scrolled-off rows <90 (only visible if the pane scrolled up): 11 range 18..28
+[NEW-target-6980649] capture took 0.158s, returned 38 lines; viewer received 0 redraw chunks / 0 bytes in the read window (+1.5s); 'row N' redrawn: 0 distinct, of which scrolled-off rows <90 (only visible if the pane scrolled up): 0
