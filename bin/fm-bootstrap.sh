@@ -10,6 +10,7 @@
 #                 "PRESENTATION_UNAVAILABLE: lavish-axi (requires >=<floor>; install: <command>) - nonvisual work may proceed with plain-text decisions and reports; install or upgrade before using Lavish",
 #                 "MISSING_MANUAL: <tool> (instructions: <url>)", "NEEDS_GH_AUTH",
 #                 "BACKEND_INVALID: <name> (known: <names>)",
+#                 "BROWSER_TOOL: invalid config/browser-tool - <reason>",
 #                 "STARTUP_MEMORY_BUDGET: invalid config/startup-memory-budget - <reason>",
 #                 "CREW_DISPATCH: invalid config/crew-dispatch.json - <reason>",
 #                 "FLEET_SYNC: <repo>: skipped|recovered|STUCK: <detail>",
@@ -187,6 +188,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 # shellcheck source=bin/fm-quota-axi-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-quota-axi-lib.sh"
+# shellcheck source=bin/fm-browser-tool-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-browser-tool-lib.sh"
 # shellcheck source=bin/fm-control-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-control-lib.sh"
 # shellcheck source=bin/fm-env-lib.sh disable=SC1091
@@ -912,7 +915,15 @@ missing_tool_diagnostic() {
 # fm_backend_required_tools (bin/fm-backend.sh). So a herdr/zellij/cmux/tern home is
 # never told tmux is missing, and only orca drops treehouse. A backend value with
 # no verified dependency set is reported before the universal checks continue.
-COMMON_TOOLS="node git gh no-mistakes gh-axi chrome-devtools-axi tasks-axi quota-axi"
+# The browser tool follows config/browser-tool (fm-browser-tool-lib.sh);
+# claude-in-chrome is a harness extension, not a CLI, so it adds no tool.
+BROWSER_TOOL_ERROR=""
+if ! BROWSER_TOOL=$(fm_browser_tool "$CONFIG" 2>&1); then
+  BROWSER_TOOL_ERROR=${BROWSER_TOOL#error: }
+  BROWSER_TOOL=chrome-devtools-axi
+fi
+COMMON_TOOLS="node git gh no-mistakes gh-axi tasks-axi quota-axi"
+[ "$BROWSER_TOOL" = claude-in-chrome ] || COMMON_TOOLS="$COMMON_TOOLS $BROWSER_TOOL"
 BACKEND=$(fm_backend_name)
 BACKEND_VALID=1
 if ! BACKEND_TOOLS=$(fm_backend_required_tools "$BACKEND"); then
@@ -1524,6 +1535,7 @@ detect_local_tools() {
   if [ "$BACKEND_VALID" -eq 0 ]; then
     echo "BACKEND_INVALID: $BACKEND (known: $FM_BACKEND_KNOWN)"
   fi
+  [ -z "$BROWSER_TOOL_ERROR" ] || echo "BROWSER_TOOL: $BROWSER_TOOL_ERROR"
   for t in $BACKEND_TOOLS; do
     fm_backend_required_tool_available "$BACKEND" "$t" \
       || missing_tool_diagnostic "$t"

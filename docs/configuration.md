@@ -789,6 +789,20 @@ With the file absent, nothing is armed and an already armed check prints nothing
 Creating the flag takes effect at the next session start, or immediately after `bin/fm-pr-health.sh arm`.
 The flag is a home-local preference and is not inherited by secondmate homes.
 
+## Browser tool (config/browser-tool)
+
+The optional local, gitignored `config/browser-tool` file chooses the browser tool that generated ship and scout briefs tell workers to use.
+It holds one value on its first line.
+
+| Value or file state | Result |
+| --- | --- |
+| `chrome-devtools-axi`, absent, or empty | Briefs name `chrome-devtools-axi`, and bootstrap requires it. |
+| `claude-in-chrome` | Briefs name the Claude in Chrome tools (`mcp__claude-in-chrome__*`) in the worker's own new tab, and bootstrap does not require `chrome-devtools-axi`. |
+
+Any other value makes brief generation refuse, so a typo never silently falls back to the default, and bootstrap reports it as `BROWSER_TOOL: invalid config/browser-tool - <reason>`.
+[`bin/fm-browser-tool-lib.sh`](../bin/fm-browser-tool-lib.sh) owns parsing and the rendered wording.
+The choice is a home-local preference and is not inherited by secondmate homes.
+
 ## No-mistakes pipeline spend (config/pipeline-spend)
 
 The optional local, gitignored `config/pipeline-spend` presence flag opts this home into recording per-task no-mistakes pipeline spend in `data/pipeline-spend.jsonl` during teardown.
@@ -2082,14 +2096,14 @@ Every home requires:
 - gh, with GitHub authentication through `gh auth login`.
 - no-mistakes v1.46.0 or newer.
 - Compatible gh-axi.
-- chrome-devtools-axi.
+- chrome-devtools-axi, unless `config/browser-tool` chooses `claude-in-chrome` (see "Browser tool" above).
 - Compatible tasks-axi, as specified in "Backlog backend" above.
 - Compatible quota-axi.
 
 [`bin/fm-bootstrap.sh`](../bin/fm-bootstrap.sh) owns the axi-family floor policy and the gh-axi and lavish-axi floors, while [`bin/fm-tasks-axi-lib.sh`](../bin/fm-tasks-axi-lib.sh) and [`bin/fm-quota-axi-lib.sh`](../bin/fm-quota-axi-lib.sh) hold their own tools' floor constants.
 This section is the single owner of that universal toolchain list; backend guides' prerequisites point here and add only their backend-specific tools.
 
-In that list, no-mistakes runs the validation pipeline, gh-axi and chrome-devtools-axi cover GitHub and browser operations, and tasks-axi plus quota-axi back backlog mutations and quota-aware array dispatch.
+In that list, no-mistakes runs the validation pipeline, gh-axi and the chosen browser tool cover GitHub and browser operations, and tasks-axi plus quota-axi back backlog mutations and quota-aware array dispatch.
 Lavish is a presentation-only dependency for visual decisions and reports; nonvisual work can proceed with plain text when it is unavailable.
 
 **Backend requirements**

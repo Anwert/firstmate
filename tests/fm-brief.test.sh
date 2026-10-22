@@ -221,6 +221,44 @@ test_ship_modes_generate_clean_briefs() {
   pass "fm-brief.sh: no-mistakes/direct-PR/local-only briefs generate cleanly"
 }
 
+# config/browser-tool chooses the browser tool a home's briefs name; an absent
+# file keeps the chrome-devtools-axi wording, and an unrecognized value is
+# refused rather than falling back to the default.
+test_home_browser_tool_renders_in_briefs() {
+  local home brief out rc
+  home="$TMP_ROOT/browser-tool-home"
+  mkdir -p "$home/data" "$home/config"
+  printf 'claude-in-chrome\n' > "$home/config/browser-tool"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" tool-ship some-proj --mode direct-PR >/dev/null 2>&1 \
+    || fail "a ship brief should scaffold with a chosen browser tool"
+  brief="$home/data/tool-ship/brief.md"
+  # shellcheck disable=SC2016 # Backticks are literal generated brief text.
+  assert_grep '3. Use gh-axi for GitHub operations and the Claude in Chrome tools (`mcp__claude-in-chrome__*`, loaded with one ToolSearch) for browser operations, in your own new tab only.' "$brief" \
+    "a ship brief must name the home's chosen browser tool in Rule 3"
+  assert_no_grep 'chrome-devtools-axi' "$brief" "a claude-in-chrome home's ship brief must not name chrome-devtools-axi"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" tool-forgejo some-proj --mode direct-PR --forge forgejo >/dev/null 2>&1 \
+    || fail "a forgejo ship brief should scaffold with a chosen browser tool"
+  # shellcheck disable=SC2016 # Backticks are literal generated brief text.
+  assert_grep '3. Use tea for Forgejo operations and the Claude in Chrome tools (`mcp__claude-in-chrome__*`' "$home/data/tool-forgejo/brief.md" \
+    "a forgejo brief must keep tea and name the chosen browser tool"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" tool-scout some-proj --scout >/dev/null 2>&1 \
+    || fail "a scout brief should scaffold with a chosen browser tool"
+  # shellcheck disable=SC2016 # Backticks are literal generated brief text.
+  assert_grep '3. Use gh-axi for GitHub operations and the Claude in Chrome tools (`mcp__claude-in-chrome__*`' "$home/data/tool-scout/brief.md" \
+    "a scout brief must name the home's chosen browser tool"
+
+  printf 'firefox\n' > "$home/config/browser-tool"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" tool-bad some-proj --mode direct-PR 2>&1); rc=$?
+  expect_code 1 "$rc" "an unrecognized browser tool must be refused"
+  assert_contains "$out" "expected one of: chrome-devtools-axi claude-in-chrome" \
+    "an unrecognized browser tool was refused without naming the accepted values"
+  [ ! -e "$home/data/tool-bad/brief.md" ] || fail "an unrecognized browser tool left a brief behind"
+  pass "fm-brief.sh: briefs name the home's chosen browser tool"
+}
+
 # --forge forgejo is the Forgejo value of the project's registered forge binding
 # (bin/fm-project-mode.sh --forge), passed at intake exactly like --mode. It
 # names tea instead of gh-axi in the ship brief's forge-CLI rule and in the
@@ -1695,6 +1733,7 @@ test_no_heredoc_in_command_substitution
 test_help_includes_entire_header
 test_ship_modes_generate_clean_briefs
 test_forge_selection_renders_correct_cli
+test_home_browser_tool_renders_in_briefs
 test_forge_external_renders_the_review_rail
 test_ship_mode_is_required_and_closed_set
 test_ship_mode_is_explicit_not_registry

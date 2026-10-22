@@ -463,6 +463,31 @@ ROWS
   pass "bootstrap separates an absent gh-axi from one below its version floor"
 }
 
+# A home on claude-in-chrome (config/browser-tool) is never told
+# chrome-devtools-axi is missing; a default home still is, and an invalid
+# value is reported.
+test_browser_tool_gates_required_tool() {
+  local case_dir fakebin out
+  case_dir="$TMP_ROOT/browser-tool"
+  mkdir -p "$case_dir/home/config"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  rm -f "$fakebin/chrome-devtools-axi"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "MISSING: chrome-devtools-axi" "a default home must still require chrome-devtools-axi"
+  printf '%s\n' claude-in-chrome > "$case_dir/home/config/browser-tool"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  [ -z "$out" ] || fail "a claude-in-chrome home must report no missing tools, got: $out"
+  printf '%s\n' firefox > "$case_dir/home/config/browser-tool"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh" 2>/dev/null)
+  assert_contains "$out" "BROWSER_TOOL: invalid config/browser-tool - holds 'firefox'; expected one of: chrome-devtools-axi claude-in-chrome" \
+    "an invalid browser tool must be reported on stdout"
+  pass "bootstrap requires chrome-devtools-axi only when chosen and reports an invalid choice"
+}
+
 test_lavish_axi_min_version() {
   local label version mode case_dir fakebin base out unavailable upgrade n
   unavailable='PRESENTATION_UNAVAILABLE: lavish-axi (requires >=0.1.77; install: npm install -g lavish-axi && lavish-axi setup hooks) - nonvisual work may proceed with plain-text decisions and reports; install or upgrade before using Lavish'
@@ -1543,6 +1568,7 @@ test_bootstrap_reporting
 test_absent_tool_cases_hide_a_real_install_in_the_base_path
 test_no_mistakes_min_version
 test_gh_axi_min_version
+test_browser_tool_gates_required_tool
 test_lavish_axi_min_version
 test_tasks_axi_min_version
 test_quota_axi_min_version
