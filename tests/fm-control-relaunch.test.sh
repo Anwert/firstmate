@@ -1071,6 +1071,28 @@ SH
   pass "fm-control relaunch: mate pins are re-read for Claude and Pi, and unusable pins refuse before stopping the agent"
 }
 
+test_claude_skill_overrides_follow_the_relaunch() {
+  local dir out rc id=rl-skillovr settings
+  dir=$(new_case skillovr "$id")
+  add_ship_task "$dir" "$id" claude
+  printf '%s\n' 'claude_skill_overrides={"deslop":"off","tdd":"off"}' >> "$dir/home/state/$id.meta"
+  out=$(run_control "$dir" "$id" relaunch --note "keep skill overrides"); rc=$?
+  expect_code 0 "$rc" "a claude relaunch with recorded skill overrides should succeed"$'\n'"$out"
+  [ "$(meta_field "$dir" "$id" claude_skill_overrides)" = '{"deslop":"off","tdd":"off"}' ] \
+    || fail "the relaunched record must keep the skill overrides, got '$(meta_field "$dir" "$id" claude_skill_overrides)'"
+  settings=$(sed -n "s/.*--settings '\({[^']*}\)'.*/\1/p" "$dir/fake/literal")
+  printf '%s' "$settings" | jq -e '.feedbackDrafts == "off" and .skillOverrides == {"deslop":"off","tdd":"off"}' >/dev/null \
+    || fail "the replacement's --settings must carry the recorded skill overrides: $settings"
+  printf claude > "$dir/fake/command"
+  : > "$dir/fake/literal"
+  out=$(run_control "$dir" "$id" relaunch --harness codex --note "switch runtime"); rc=$?
+  expect_code 1 "$rc" "relaunching a task with skill overrides onto codex must refuse"
+  assert_contains "$out" "records claude skill overrides" "refusal must name the overrides"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "a refused relaunch stopped the running agent"
+  [ ! -s "$dir/fake/literal" ] || fail "a refused relaunch sent lifecycle input"
+  pass "fm-control relaunch: a claude replacement keeps the task's skill overrides and another runtime refuses before stop"
+}
+
 test_pi_exclude_tools_follow_the_relaunch() {
   local dir out rc id=rl-pi-excl
   dir=$(new_case pi-exclude "$id")
@@ -3036,6 +3058,7 @@ test_same_harness_relaunch_keeps_the_profile_axes
 test_native_ultra_relaunch_preserves_profile_and_rejects_before_stop
 test_signed_out_worker_account_pin_refuses_before_stop
 test_worker_account_pin_follows_the_relaunch
+test_claude_skill_overrides_follow_the_relaunch
 test_secondmate_account_pin_follows_relaunch_and_refuses_before_stop
 test_pi_exclude_tools_follow_the_relaunch
 test_exclude_tools_refusals_happen_before_the_agent_stops

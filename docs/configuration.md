@@ -9,7 +9,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | --- | --- |
 | Firstmate's code, private files, or project location | [FM_HOME](#fm_home) and [operational home layout](#operational-home-layout-and-state) |
 | Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend) and [harness support](#harness-support) |
-| Worker permissions, accounts, or environment | [Codex approval review](#codex-automatic-approval-review), [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [Codex permission mode](#codex-permission-mode-configcodex-permission-mode), [persistent managed-policy failover](#persistent-managed-policy-failover), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist), and its [Orca environment source](#orca-environment-source-configlaunch-env-tmux-session) |
+| Worker permissions, accounts, or environment | [Codex approval review](#codex-automatic-approval-review), [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [Claude skill overrides](#claude-skill-overrides---claude-skill-overrides), [Codex permission mode](#codex-permission-mode-configcodex-permission-mode), [persistent managed-policy failover](#persistent-managed-policy-failover), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist), and its [Orca environment source](#orca-environment-source-configlaunch-env-tmux-session) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), [external memory tiers](#external-memory-tiers-memory-layering-section), [record export](#record-export-configrecord-export-root), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), [warm-cache compaction](#warm-cache-compaction-configwarm-compact), and [Calm preference](#calm-preference-configcalm) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) |
@@ -1439,6 +1439,17 @@ Recovery uses the existing [lifecycle control plane](agent-control.md), respecti
 A `backend=t3code` task refuses before any change, because T3 already runs it at `full-access` and its spawns refuse both fallbacks; approve the pending request in T3 Code itself or choose another backend.
 Generic login failures do not establish a defeated bypass, and managed hook review remains a separate operator decision.
 Neither fallback is unrestricted execution, and Firstmate does not change vendor or security-agent settings.
+
+## Claude skill overrides (--claude-skill-overrides)
+
+`bin/fm-spawn.sh --claude-skill-overrides <file>` hides named user-scope skills from one Claude ship or scout, for example to keep a pstack worker on pstack's skills while other workers keep the full set.
+The file is any path outside the project, holding exactly one JSON object of Claude Code `skillOverrides`, such as `{"deslop":"off","tdd":"off"}`.
+The spawn merges it as `skillOverrides` into the worker's one inline `--settings` JSON, so it reaches that worker alone and never `~/.claude`.
+Plugin skills such as `pstack:*` are outside `skillOverrides`' reach, so an unqualified name never hides a plugin skill of the same name; a `permissions.deny` `Skill(<name>)` rule would, which is why it is not used.
+A file that is missing or not exactly one JSON object, a secondmate spawn, and any non-Claude harness refuse before any endpoint, worktree, or task record exists.
+The compact object is recorded as `claude_skill_overrides=` in the task record, a relaunch reuses it and refuses the flag, and a relaunch onto another harness refuses before the running agent stops.
+Without the flag the launch and the task record are unchanged.
+The settings page documents `skillOverrides` and `--settings` precedence: <https://code.claude.com/docs/en/settings>.
 
 ## Worker tool exclusions (config/crew-exclude-tools)
 

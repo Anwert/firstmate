@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a crewmate in a treehouse or Orca worktree, or a
 # secondmate in its isolated firstmate home.
-# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
-#        fm-spawn.sh <task-id> <project-dir> --scout [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
+# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--claude-skill-overrides <file>] [--herdr-resume-lock-wait]
+#        fm-spawn.sh <task-id> <project-dir> --scout [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--claude-skill-overrides <file>] [--herdr-resume-lock-wait]
 #        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
 #   --mode and --yolo are this task's delivery contract, REQUIRED for every ship
 #   spawn and refused on --scout and --secondmate spawns. Firstmate resolves both
@@ -472,6 +472,17 @@
 #   firstmate observes a bypass approval prompt or policy refusal; no polling.
 #   T3 Code always uses full-access, so it refuses Claude `auto` and Codex
 #   `approve-for-me` or `restricted` before mutation.
+# Claude skill overrides (--claude-skill-overrides <file>):
+#   Opt-in per spawn, for a ship or scout on the claude harness only. The file
+#   holds one JSON object of Claude Code skillOverrides, such as
+#   {"deslop":"off"}, merged as "skillOverrides" into the worker's one inline
+#   --settings JSON so the named user-scope skills are hidden from that worker
+#   alone; plugin skills are outside skillOverrides' reach. A file that is not
+#   exactly one JSON object, a secondmate, or any other harness refuses the
+#   spawn before any endpoint, worktree, or record exists. The compact object
+#   is recorded as claude_skill_overrides= in the task record, which a relaunch
+#   reuses (and refuses the flag on), so relaunching such a task onto another
+#   harness refuses too. Without the flag the launch is unchanged.
 # Worker tool exclusions:
 #   docs/configuration.md "Worker tool exclusions" owns config/crew-exclude-tools
 #   and its operator contract. Resolve it with bin/fm-exclude-tools-lib.sh
@@ -980,6 +991,9 @@ BASE_BRANCH_SET=0
 UPSTREAM_CONSENT=
 UPSTREAM_CONSENT_SET=0
 TRACEPARENT_SET=0
+CLAUDE_SKILL_OVERRIDES_FILE=
+CLAUDE_SKILL_OVERRIDES_SET=0
+CLAUDE_SKILL_OVERRIDES=
 RELAUNCH=0
 # Opt-in only: exact-resume presentation-order lock waits instead of refusing.
 # Absent/unset keeps upstream refuse-on-contention. See header.
@@ -1034,6 +1048,10 @@ for a in "$@"; do
     traceparent)
       TRACEPARENT_ARG=$a
       TRACEPARENT_SET=1
+      ;;
+    claude-skill-overrides)
+      CLAUDE_SKILL_OVERRIDES_FILE=$a
+      CLAUDE_SKILL_OVERRIDES_SET=1
       ;;
     *)
       echo "error: internal parser state for --$want_value" >&2
@@ -1104,6 +1122,11 @@ for a in "$@"; do
     TRACEPARENT_ARG=${a#--traceparent=}
     TRACEPARENT_SET=1
     ;;
+  --claude-skill-overrides) want_value="claude-skill-overrides" ;;
+  --claude-skill-overrides=*)
+    CLAUDE_SKILL_OVERRIDES_FILE=${a#--claude-skill-overrides=}
+    CLAUDE_SKILL_OVERRIDES_SET=1
+    ;;
   *) POS+=("$a") ;;
   esac
 done
@@ -1141,6 +1164,10 @@ done
 }
 [ "$TRACEPARENT_SET" -eq 0 ] || [ -n "$TRACEPARENT_ARG" ] || {
   echo "error: --traceparent requires a non-empty value" >&2
+  exit 1
+}
+[ "$CLAUDE_SKILL_OVERRIDES_SET" -eq 0 ] || [ -n "$CLAUDE_SKILL_OVERRIDES_FILE" ] || {
+  echo "error: --claude-skill-overrides requires a non-empty file path" >&2
   exit 1
 }
 # A parent-delivered carrier replaces this home's own resolution, so it is
@@ -1195,6 +1222,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
   [ "$UPSTREAM_CONSENT_SET" -eq 0 ] || {
     echo "error: --relaunch reuses the task's recorded upstream consent; --upstream-consent cannot override it" >&2
+    exit 1
+  }
+  [ "$CLAUDE_SKILL_OVERRIDES_SET" -eq 0 ] || {
+    echo "error: --relaunch reuses the task's recorded claude skill overrides; --claude-skill-overrides cannot override them" >&2
     exit 1
   }
 else
@@ -1261,6 +1292,22 @@ else
       echo "error: --upstream-consent applies only to ship spawns; a scout publishes nothing and a secondmate records no delivery contract" >&2
       exit 1
     }
+  fi
+  if [ "$CLAUDE_SKILL_OVERRIDES_SET" -eq 1 ]; then
+    [ "$KIND" != secondmate ] || {
+      echo "error: --claude-skill-overrides applies only to ship and scout spawns; a secondmate keeps its own claude settings" >&2
+      exit 1
+    }
+    if [ ! -f "$CLAUDE_SKILL_OVERRIDES_FILE" ] || [ ! -r "$CLAUDE_SKILL_OVERRIDES_FILE" ]; then
+      echo "error: --claude-skill-overrides must name a readable regular file holding one JSON object of skillOverrides; got '$CLAUDE_SKILL_OVERRIDES_FILE'" >&2
+      exit 1
+    fi
+    # A single quote can only occur inside a JSON string, so its \u0027 escape
+    # keeps the object valid while it rides inside the single-quoted --settings.
+    if ! CLAUDE_SKILL_OVERRIDES=$(jq -rs 'if length == 1 and (.[0] | type) == "object" then .[0] | tojson | gsub("'"'"'"; "\\u0027") else error("not one JSON object") end' "$CLAUDE_SKILL_OVERRIDES_FILE" 2>/dev/null) || [ -z "$CLAUDE_SKILL_OVERRIDES" ]; then
+      echo "error: --claude-skill-overrides file $CLAUDE_SKILL_OVERRIDES_FILE must hold exactly one JSON object of skillOverrides, such as {\"deslop\":\"off\"}" >&2
+      exit 1
+    fi
   fi
 fi
 
@@ -2029,6 +2076,7 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   [ "$YOLO_SET" -eq 0 ] || shared_args+=(--yolo "$YOLO")
   [ "$BRANCH_PREFIX_SET" -eq 0 ] || shared_args+=(--branch-prefix "$BRANCH_PREFIX")
   [ "$BASE_BRANCH_SET" -eq 0 ] || shared_args+=(--base-branch "$BASE_BRANCH")
+  [ "$CLAUDE_SKILL_OVERRIDES_SET" -eq 0 ] || shared_args+=(--claude-skill-overrides "$CLAUDE_SKILL_OVERRIDES_FILE")
   [ "$HERDR_RESUME_LOCK_WAIT" -eq 0 ] || shared_args+=(--herdr-resume-lock-wait)
   for pair in "${POS[@]}"; do
     case "$pair" in
@@ -2327,6 +2375,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   }
   fm_backend_validate_task_endpoint "$RELAUNCH_META" "$ID" || exit 1
+  CLAUDE_SKILL_OVERRIDES=$(fm_meta_get "$RELAUNCH_META" claude_skill_overrides)
   BACKEND=$FM_BACKEND_VALIDATED_BACKEND
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
   fm_backend_validate_spawn "$BACKEND" || exit 1
@@ -3089,6 +3138,16 @@ fi
 if [ "$KIND" = secondmate ] && [ "$HARNESS" = rovo ]; then
   echo "error: rovo is a verified crewmate/scout adapter only and cannot run a secondmate; it has no primary supervision protocol. Select a harness verified for secondmates." >&2
   exit 1
+fi
+
+if [ -n "$CLAUDE_SKILL_OVERRIDES" ]; then
+  case "$LAUNCH" in
+  *__CLAUDESETTINGS__*) ;;
+  *)
+    echo "error: claude skill overrides apply only to claude ship and scout workers; harness '${HARNESS:-raw command}' has no claude --settings to carry them. Launch this task on claude or spawn it without --claude-skill-overrides." >&2
+    exit 1
+    ;;
+  esac
 fi
 
 # Command Code's idle placeholder reads empty only with a Command Code pane
@@ -6970,7 +7029,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch upstream_consent forge backup_remote backup_prefix model effort opencode_version account account_provider omp_profile busy_gen spawn_gen approval_mode traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id paseo_terminal_id paseo_workspace_id rex_server rex_session_id rex_window_id rex_block_id t3_thread_id t3_project_id tern_session_id tern_tab_id tern_block_id hc_session hc_terminal home projects control_relaunch_tx polytoken_session polytoken_port polytoken_credential", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch upstream_consent claude_skill_overrides forge backup_remote backup_prefix model effort opencode_version account account_provider omp_profile busy_gen spawn_gen approval_mode traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id paseo_terminal_id paseo_workspace_id rex_server rex_session_id rex_window_id rex_block_id t3_thread_id t3_project_id tern_session_id tern_tab_id tern_block_id hc_session hc_terminal home projects control_relaunch_tx polytoken_session polytoken_port polytoken_credential", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -6995,6 +7054,7 @@ preserve_relaunch_meta() {
   echo "tasktmp=$TASK_TMP"
   [ -z "$BASE_BRANCH" ] || echo "base_branch=$BASE_BRANCH"
   [ -z "$UPSTREAM_CONSENT" ] || echo "upstream_consent=$UPSTREAM_CONSENT"
+  [ -z "$CLAUDE_SKILL_OVERRIDES" ] || echo "claude_skill_overrides=$CLAUDE_SKILL_OVERRIDES"
   # Read by bin/fm-dod-lib.sh's ready-report gate; absent on every other forge.
   [ "$EXTERNAL_REVIEW" = 0 ] || echo "forge=external"
   [ -z "$EXTERNAL_BACKUP_REMOTE" ] || echo "backup_remote=$EXTERNAL_BACKUP_REMOTE"
@@ -7192,8 +7252,10 @@ case "$LAUNCH" in
   if [ "$KIND" = secondmate ]; then
     LAUNCH=${LAUNCH//__CLAUDESETTINGS__/$(shell_quote "$STATE_REAL/$ID.claude-settings.json")}
   else
-    claude_settings="'{\"feedbackDrafts\":\"off\"__CLAUDEATTRIBUTION__}'"
-    LAUNCH=${LAUNCH//__CLAUDESETTINGS__/$claude_settings}
+    claude_settings="'{\"feedbackDrafts\":\"off\"__CLAUDEATTRIBUTION__"
+    [ -z "$CLAUDE_SKILL_OVERRIDES" ] || claude_settings="$claude_settings,\"skillOverrides\":$CLAUDE_SKILL_OVERRIDES"
+    claude_settings="$claude_settings}'"
+    LAUNCH=${LAUNCH//__CLAUDESETTINGS__/"$claude_settings"}
   fi
   ;;
 esac

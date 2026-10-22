@@ -90,7 +90,8 @@
 #              stops.
 #              The same pre-stop refusal applies to this home's worker tool
 #              exclusions (bin/fm-exclude-tools-lib.sh): a malformed list, or a
-#              replacement runtime that cannot hide the listed tools.
+#              replacement runtime that cannot hide the listed tools, and to
+#              recorded claude skill overrides on a non-claude replacement.
 #              Refused on t3code before anything is stopped: a T3 thread
 #              keeps its conversation, so a new turn or a provider change on
 #              it continues the same agent rather than a fresh one
@@ -1077,6 +1078,12 @@ resolve_relaunch_profile() {
   # agent stops. Secondmate agents are not covered.
   if [ "$KIND" != secondmate ]; then
     fm_exclude_tools_check "$TARGET_HARNESS" 0 "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}" >/dev/null || return 1
+  fi
+  # Likewise recorded claude skill overrides, which only a claude replacement
+  # can carry (bin/fm-spawn.sh --claude-skill-overrides).
+  if [ -n "$(fm_meta_get "$META" claude_skill_overrides)" ] && [ "$TARGET_HARNESS" != claude ]; then
+    echo "error: task $ID records claude skill overrides, which harness '$TARGET_HARNESS' cannot carry; relaunch it on claude" >&2
+    return 1
   fi
 }
 

@@ -2713,6 +2713,94 @@ test_codex_permission_does_not_change_other_harnesses() {
 test_codex_permission_modes
 test_codex_permission_invalid_refuses_before_mutation
 test_codex_permission_does_not_change_other_harnesses
+
+# --claude-skill-overrides (bin/fm-spawn.sh header): a per-spawn skillOverrides
+# object merged into the one inline --settings JSON of a claude ship or scout,
+# recorded for relaunch; absent keeps the launch unchanged, malformed content
+# or a non-claude harness refuses before endpoint or metadata.
+test_claude_skill_overrides_absent_keeps_launch_unchanged() {
+  local rec id out status launch expected
+  id=skillovr-absent-z30
+  rec=$(make_spawn_case skillovr-absent claude "$id")
+  read_case_record "$rec"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "claude spawn without skill overrides should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  expected=$(claude_expected_launch "$launch" "$HOME_DIR" "$id" --dangerously-skip-permissions)
+  [ "$launch" = "$expected" ] || fail "a spawn without --claude-skill-overrides changed the claude launch"$'\n'"expected: $expected"$'\n'"actual:   $launch"
+  ! grep -q "^claude_skill_overrides=" "$HOME_DIR/state/$id.meta" || fail "an unset option must leave the task record without claude_skill_overrides="
+  pass "fm-spawn: without --claude-skill-overrides the claude launch and record are unchanged"
+}
+
+test_claude_skill_overrides_merge_into_ship_and_scout_settings() {
+  local kind rec id out status launch settings
+  for kind in ship scout; do
+    id="skillovr-$kind-z31"
+    rec=$(make_spawn_case "skillovr-$kind" claude "$id")
+    read_case_record "$rec"
+    printf '%s\n' '{' '  "deslop": "off",' "  \"it's\": \"off\"," '  "pr": "on"' '}' > "$CASE_DIR/overrides.json"
+
+    if [ "$kind" = ship ]; then
+      out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --claude-skill-overrides "$CASE_DIR/overrides.json")
+    else
+      out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --scout --claude-skill-overrides="$CASE_DIR/overrides.json")
+    fi
+    status=$?
+    expect_code 0 "$status" "claude $kind spawn with skill overrides should succeed"$'\n'"$out"
+    launch=$(cat "$LAUNCH_LOG")
+    settings=$(claude_settings_json_arg "$launch") || fail "claude $kind launch carried no --settings"$'\n'"$launch"
+    printf '%s' "$settings" | jq -e '
+      .feedbackDrafts == "off"
+      and .attribution == {"commit":"","pr":"","sessionUrl":false}
+      and .skillOverrides == {"deslop":"off","it'"'"'s":"off","pr":"on"}
+    ' >/dev/null || fail "claude $kind --settings did not carry the merged skillOverrides: $settings"
+    [ "$(grep -c -- '--settings' <<<"$launch")" -eq 1 ] || fail "claude $kind launch must keep exactly one --settings"
+    assert_grep "claude_skill_overrides=" "$HOME_DIR/state/$id.meta" "the $kind task record must keep the overrides for relaunch"
+  done
+  pass "fm-spawn: --claude-skill-overrides merges into the one inline --settings of claude ships and scouts"
+}
+
+test_claude_skill_overrides_malformed_file_refuses_before_endpoint_or_metadata() {
+  local rec id out status content n=0
+  for content in '["deslop"]' '{"deslop":' '{} {}' '' 'missing'; do
+    n=$((n + 1))
+    id="skillovr-bad$n-z32"
+    rec=$(make_spawn_case "skillovr-bad$n" claude "$id")
+    read_case_record "$rec"
+    if [ "$content" = missing ]; then
+      rm -f "$CASE_DIR/overrides.json"
+    else
+      printf '%s' "$content" > "$CASE_DIR/overrides.json"
+    fi
+
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --claude-skill-overrides "$CASE_DIR/overrides.json")
+    status=$?
+    expect_code 1 "$status" "skill overrides '$content' must refuse the spawn"
+    assert_contains "$out" "--claude-skill-overrides" "refusal for '$content' must name the option"
+    [ ! -s "$LAUNCH_LOG" ] || fail "malformed skill overrides '$content' must launch nothing (got: $(cat "$LAUNCH_LOG"))"
+    assert_absent "$HOME_DIR/state/$id.meta" "refusal for '$content' must happen before meta is written"
+  done
+  pass "fm-spawn: a missing or non-object --claude-skill-overrides file refuses before any endpoint or metadata"
+}
+
+test_claude_skill_overrides_non_claude_harness_refuses() {
+  local rec id out status
+  id=skillovr-codex-z33
+  rec=$(make_spawn_case skillovr-codex codex "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"deslop":"off"}' > "$CASE_DIR/overrides.json"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --harness codex --claude-skill-overrides "$CASE_DIR/overrides.json")
+  status=$?
+  expect_code 1 "$status" "a codex spawn with claude skill overrides must refuse"
+  assert_contains "$out" "harness 'codex' has no claude --settings" "refusal must name the harness"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused codex spawn must launch nothing (got: $(cat "$LAUNCH_LOG"))"
+  assert_absent "$HOME_DIR/state/$id.meta" "refusal must happen before meta is written"
+  pass "fm-spawn: --claude-skill-overrides on a non-claude harness refuses"
+}
+
 test_launch_preserves_inherited_git_config
 test_worker_launch_delivers_role_scope
 test_no_profile_keeps_claude_profile_defaults
@@ -2789,6 +2877,10 @@ test_claude_permission_mode_auto_reaches_scout_launch
 test_claude_worker_launch_covers_task_channel_dirs
 test_claude_permission_mode_invalid_refuses_before_endpoint_or_metadata
 test_non_claude_harness_ignores_claude_permission_mode
+test_claude_skill_overrides_absent_keeps_launch_unchanged
+test_claude_skill_overrides_merge_into_ship_and_scout_settings
+test_claude_skill_overrides_malformed_file_refuses_before_endpoint_or_metadata
+test_claude_skill_overrides_non_claude_harness_refuses
 test_non_claude_harness_ignores_config_dir
 test_claude_task_launch_carries_control_channel_authority
 test_claude_secondmate_launch_omits_task_control_channel_authority
