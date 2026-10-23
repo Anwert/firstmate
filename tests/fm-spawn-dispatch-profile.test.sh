@@ -2818,6 +2818,32 @@ test_claude_skill_overrides_allow_list_hides_every_other_installed_skill() {
   pass "fm-spawn: an \$allow list hides every other installed user skill at launch"
 }
 
+# --flow records the delivery flow a later fm-flow-check reads, and refuses a
+# flow with no rules before any endpoint or record exists.
+test_flow_is_recorded_and_unknown_flow_refuses() {
+  local rec id out status
+  id=flow-ok-z36
+  rec=$(make_spawn_case flow-ok claude "$id")
+  read_case_record "$rec"
+  mkdir -p "$HOME_DIR/config"
+  printf '%s\n' '{"pstack":{"require_skills":["pr"]}}' > "$HOME_DIR/config/flow-checks.json"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --flow pstack)
+  status=$?
+  expect_code 0 "$status" "a spawn with a known flow should succeed"$'\n'"$out"
+  assert_grep 'flow=pstack' "$HOME_DIR/state/$id.meta" "the task record must keep the flow"
+
+  id=flow-bad-z37
+  rec=$(make_spawn_case flow-bad claude "$id")
+  read_case_record "$rec"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --flow pstack)
+  status=$?
+  expect_code 1 "$status" "a flow with no rules must refuse"
+  assert_contains "$out" "flow-checks.json" "the refusal must name the rules file"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused flow must launch nothing"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused flow must leave no record"
+  pass "fm-spawn: --flow is recorded for the flow check, and a flow without rules refuses"
+}
+
 test_claude_skill_overrides_non_claude_harness_refuses() {
   local rec id out status
   id=skillovr-codex-z33
@@ -2915,6 +2941,7 @@ test_claude_skill_overrides_merge_into_ship_and_scout_settings
 test_claude_skill_overrides_malformed_file_refuses_before_endpoint_or_metadata
 test_claude_skill_overrides_non_claude_harness_refuses
 test_claude_skill_overrides_allow_list_hides_every_other_installed_skill
+test_flow_is_recorded_and_unknown_flow_refuses
 test_non_claude_harness_ignores_config_dir
 test_claude_task_launch_carries_control_channel_authority
 test_claude_secondmate_launch_omits_task_control_channel_authority

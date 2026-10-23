@@ -1093,6 +1093,20 @@ test_claude_skill_overrides_follow_the_relaunch() {
   pass "fm-control relaunch: a claude replacement keeps the task's skill overrides and another runtime refuses before stop"
 }
 
+test_flow_follows_the_relaunch_once() {
+  local dir out rc id=rl-flow
+  dir=$(new_case flow "$id")
+  add_ship_task "$dir" "$id" claude
+  mkdir -p "$dir/home/config"
+  printf '%s\n' '{"pstack":{"require_skills":["pr"]}}' > "$dir/home/config/flow-checks.json"
+  printf '%s\n' 'flow=pstack' >> "$dir/home/state/$id.meta"
+  out=$(run_control "$dir" "$id" relaunch --note "keep the flow"); rc=$?
+  expect_code 0 "$rc" "a relaunch with a recorded flow should succeed"$'\n'"$out"
+  [ "$(grep -c '^flow=pstack$' "$dir/home/state/$id.meta")" -eq 1 ] \
+    || fail "the relaunched record must keep the flow exactly once: $(cat "$dir/home/state/$id.meta")"
+  pass "fm-control relaunch: a replacement keeps the task's flow once"
+}
+
 test_pi_exclude_tools_follow_the_relaunch() {
   local dir out rc id=rl-pi-excl
   dir=$(new_case pi-exclude "$id")
@@ -3059,6 +3073,7 @@ test_native_ultra_relaunch_preserves_profile_and_rejects_before_stop
 test_signed_out_worker_account_pin_refuses_before_stop
 test_worker_account_pin_follows_the_relaunch
 test_claude_skill_overrides_follow_the_relaunch
+test_flow_follows_the_relaunch_once
 test_secondmate_account_pin_follows_relaunch_and_refuses_before_stop
 test_pi_exclude_tools_follow_the_relaunch
 test_exclude_tools_refusals_happen_before_the_agent_stops

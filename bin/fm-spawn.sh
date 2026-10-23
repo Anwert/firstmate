@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a crewmate in a treehouse or Orca worktree, or a
 # secondmate in its isolated firstmate home.
-# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--claude-skill-overrides <file>] [--herdr-resume-lock-wait]
-#        fm-spawn.sh <task-id> <project-dir> --scout [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--claude-skill-overrides <file>] [--herdr-resume-lock-wait]
+# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--claude-skill-overrides <file>] [--flow <name>] [--herdr-resume-lock-wait]
+#        fm-spawn.sh <task-id> <project-dir> --scout [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--claude-skill-overrides <file>] [--flow <name>] [--herdr-resume-lock-wait]
 #        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
 #   --mode and --yolo are this task's delivery contract, REQUIRED for every ship
 #   spawn and refused on --scout and --secondmate spawns. Firstmate resolves both
@@ -485,6 +485,11 @@
 #   is recorded as claude_skill_overrides= in the task record, which a relaunch
 #   reuses (and refuses the flag on), so relaunching such a task onto another
 #   harness refuses too. Without the flag the launch is unchanged.
+# Delivery flow (--flow <name>):
+#   Opt-in per ship or scout spawn. The name must have an object in
+#   config/flow-checks.json; it is recorded as flow= in the task record, which a
+#   relaunch reuses, so bin/fm-flow-check.sh and the wake drain can check the
+#   worker against that flow without being told it again.
 # Worker tool exclusions:
 #   docs/configuration.md "Worker tool exclusions" owns config/crew-exclude-tools
 #   and its operator contract. Resolve it with bin/fm-exclude-tools-lib.sh
@@ -995,6 +1000,8 @@ UPSTREAM_CONSENT_SET=0
 TRACEPARENT_SET=0
 CLAUDE_SKILL_OVERRIDES_FILE=
 CLAUDE_SKILL_OVERRIDES_SET=0
+FLOW=
+FLOW_SET=0
 CLAUDE_SKILL_OVERRIDES=
 RELAUNCH=0
 # Opt-in only: exact-resume presentation-order lock waits instead of refusing.
@@ -1054,6 +1061,10 @@ for a in "$@"; do
     claude-skill-overrides)
       CLAUDE_SKILL_OVERRIDES_FILE=$a
       CLAUDE_SKILL_OVERRIDES_SET=1
+      ;;
+    flow)
+      FLOW=$a
+      FLOW_SET=1
       ;;
     *)
       echo "error: internal parser state for --$want_value" >&2
@@ -1128,6 +1139,11 @@ for a in "$@"; do
   --claude-skill-overrides=*)
     CLAUDE_SKILL_OVERRIDES_FILE=${a#--claude-skill-overrides=}
     CLAUDE_SKILL_OVERRIDES_SET=1
+    ;;
+  --flow) want_value=flow ;;
+  --flow=*)
+    FLOW=${a#--flow=}
+    FLOW_SET=1
     ;;
   *) POS+=("$a") ;;
   esac
@@ -1230,6 +1246,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: --relaunch reuses the task's recorded claude skill overrides; --claude-skill-overrides cannot override them" >&2
     exit 1
   }
+  [ "$FLOW_SET" -eq 0 ] || {
+    echo "error: --relaunch reuses the task's recorded flow; --flow cannot override it" >&2
+    exit 1
+  }
 else
   # Delivery contract (AGENTS.md section 7). A ship task's mode and yolo are
   # firstmate's per-task decision, so they are required and closed-set validated
@@ -1310,6 +1330,16 @@ else
       echo "error: --claude-skill-overrides file $CLAUDE_SKILL_OVERRIDES_FILE must hold exactly one JSON object of skillOverrides, such as {\"deslop\":\"off\"}, whose optional \"\$allow\" is an array of skill names" >&2
       exit 1
     fi
+  fi
+  if [ "$FLOW_SET" -eq 1 ]; then
+    [ "$KIND" != secondmate ] || {
+      echo "error: --flow applies only to ship and scout spawns" >&2
+      exit 1
+    }
+    jq -e --arg f "$FLOW" '.[$f] | objects' "$CONFIG/flow-checks.json" >/dev/null 2>&1 || {
+      echo "error: --flow $FLOW names no object in $CONFIG/flow-checks.json, so bin/fm-flow-check.sh could not check it" >&2
+      exit 1
+    }
   fi
 fi
 
@@ -2378,6 +2408,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
   fm_backend_validate_task_endpoint "$RELAUNCH_META" "$ID" || exit 1
   CLAUDE_SKILL_OVERRIDES=$(fm_meta_get "$RELAUNCH_META" claude_skill_overrides)
+  FLOW=$(fm_meta_get "$RELAUNCH_META" flow)
   BACKEND=$FM_BACKEND_VALIDATED_BACKEND
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
   fm_backend_validate_spawn "$BACKEND" || exit 1
@@ -7057,7 +7088,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch upstream_consent claude_skill_overrides forge backup_remote backup_prefix model effort opencode_version account account_provider omp_profile busy_gen spawn_gen approval_mode traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id paseo_terminal_id paseo_workspace_id rex_server rex_session_id rex_window_id rex_block_id t3_thread_id t3_project_id tern_session_id tern_tab_id tern_block_id hc_session hc_terminal home projects control_relaunch_tx polytoken_session polytoken_port polytoken_credential", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch upstream_consent claude_skill_overrides flow forge backup_remote backup_prefix model effort opencode_version account account_provider omp_profile busy_gen spawn_gen approval_mode traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id paseo_terminal_id paseo_workspace_id rex_server rex_session_id rex_window_id rex_block_id t3_thread_id t3_project_id tern_session_id tern_tab_id tern_block_id hc_session hc_terminal home projects control_relaunch_tx polytoken_session polytoken_port polytoken_credential", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -7083,6 +7114,7 @@ preserve_relaunch_meta() {
   [ -z "$BASE_BRANCH" ] || echo "base_branch=$BASE_BRANCH"
   [ -z "$UPSTREAM_CONSENT" ] || echo "upstream_consent=$UPSTREAM_CONSENT"
   [ -z "$CLAUDE_SKILL_OVERRIDES" ] || echo "claude_skill_overrides=$CLAUDE_SKILL_OVERRIDES"
+  [ -z "$FLOW" ] || echo "flow=$FLOW"
   # Read by bin/fm-dod-lib.sh's ready-report gate; absent on every other forge.
   [ "$EXTERNAL_REVIEW" = 0 ] || echo "forge=external"
   [ -z "$EXTERNAL_BACKUP_REMOTE" ] || echo "backup_remote=$EXTERNAL_BACKUP_REMOTE"

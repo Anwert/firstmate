@@ -455,6 +455,45 @@ EOF
   [ "$shown" -gt 0 ] || return 0
 }
 
+# A task spawned with --flow is checked against its flow's rules
+# (bin/fm-flow-check.sh) once per new done or needs-decision event, so a worker
+# that drifted from its flow is named in the same presentation as the result
+# firstmate is about to relay. The per-task marker records the checked event and
+# is written only after the presentation is committed (commit_flow_check_markers).
+FLOW_CHECK_PENDING=
+print_flow_check_section() {  # <snapshot>
+  local snapshot=$1 task size ident verb out shown=0
+  FLOW_CHECK_PENDING=
+  while IFS=$(printf '\t') read -r task size ident; do
+    [ -n "$task" ] || continue
+    grep -q '^flow=' "$STATE/$task.meta" 2>/dev/null || continue
+    status_snapshot_latest_event "$STATE/$task.status" "$size" "$ident" || continue
+    status_line_verb "$FM_STATUS_SNAPSHOT_EVENT_LINE" verb
+    case "$verb" in done|needs-decision) ;; *) continue ;; esac
+    [ "$(cat "$STATE/$task.flow-checked" 2>/dev/null || true)" != "$FM_STATUS_SNAPSHOT_EVENT_ENDPOINT" ] || continue
+    out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-flow-check.sh" "$task" 2>&1)
+    if [ "$shown" -eq 0 ]; then
+      printf 'FLOW CHECK (a flow task reported done or a decision; read before relaying it):\n' || return 1
+    fi
+    printf '%s\n' "$out" || return 1
+    shown=$((shown + 1))
+    FLOW_CHECK_PENDING="$FLOW_CHECK_PENDING$task$(printf '\t')$FM_STATUS_SNAPSHOT_EVENT_ENDPOINT
+"
+  done <<EOF
+$snapshot
+EOF
+}
+
+commit_flow_check_markers() {
+  local task endpoint
+  while IFS=$(printf '\t') read -r task endpoint; do
+    [ -n "$task" ] || continue
+    printf '%s\n' "$endpoint" > "$STATE/$task.flow-checked" || return 1
+  done <<EOF
+$FLOW_CHECK_PENDING
+EOF
+}
+
 # Print the consolidated OPEN DECISIONS section: every still-open
 # needs-decision/blocked, fleet-wide, folded from the durable status logs by
 # fm-classify-lib.sh's status_open_decisions fold (via its cursor-backed
@@ -763,6 +802,7 @@ print_status_sections() {
     print_unread_status_section "$snapshot" \
       && print_status_outcome_backstop_section "$snapshot" \
       && print_open_decisions_section "$snapshot" \
+      && print_flow_check_section "$snapshot" \
       && print_record_divergence_section
   } > "$prepared"; then
     rm -f -- "$prepared"
@@ -780,6 +820,7 @@ print_status_sections() {
     return 1
   fi
   rm -f -- "$prepared"
+  commit_flow_check_markers
 }
 
 print_status_presentation() {  # [<deduped-raw-rows>]
