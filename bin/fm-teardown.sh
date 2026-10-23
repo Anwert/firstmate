@@ -41,6 +41,9 @@
 # lift the deferral (it authorizes discarding unlanded WORK, never the
 # captain's question), and bin/fm-captain-hold.sh answer stays the only act
 # that closes the call.
+# REFUSES, even under --force, while the task id appears in this home's
+# data/release-actions.md: a production step listed there still needs the
+# worker's context, and removing the task from that file is what releases it.
 # REFUSES if the worktree holds work that has not LANDED, because cleanup
 # hard-resets/removes the worktree and kills its processes. Work has landed when it is
 # reachable from any remote-tracking branch (a fork counts as a remote, so
@@ -768,6 +771,15 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
     esac
   fi
   [ "$TEARDOWN_LEGACY_PENDING" = 1 ] || TEARDOWN_META_SPAWN_GEN=$FM_BACKLOG_META_SPAWN_GEN
+fi
+# A task named in this home's data/release-actions.md still owes a production
+# step whose context lives in its worker, so cleanup refuses until that entry is
+# gone. --force does not lift it: it authorizes discarding work, not dropping a
+# pending release step.
+if [ "$TEARDOWN_META_KIND" != secondmate ] && [ -f "$DATA/release-actions.md" ] \
+  && LC_ALL=C grep -Eq "(^|[^A-Za-z0-9._-])${ID//./\\.}([^A-Za-z0-9._-]|\$)" "$DATA/release-actions.md"; then
+  echo "REFUSED: task $ID is named in $DATA/release-actions.md, so a production step still needs its worker; finish that step and remove the task from that file, then retry" >&2
+  exit 1
 fi
 # Cleanup never closes a captain call (see the header). Asked here, before any
 # destructive step, so "cannot tell" can refuse while everything is intact.

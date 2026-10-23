@@ -1083,6 +1083,11 @@ The file is created lazily on first learning and follows the internal [`stow` sk
 
 There is no shared learnings file by captain decision.
 
+## Pending release steps (data/release-actions.md)
+
+The optional local, gitignored `data/release-actions.md` lists production steps that still need a worker's context after its change merged.
+While a task id appears there as a whole word, `bin/fm-teardown.sh` refuses to clean that task up, `--force` included; removing the task from the file releases it.
+
 ## External memory tiers (Memory layering section)
 
 A home may declare memory stores outside firstmate, such as MCP-served knowledge stores, as authoritative for named classes of knowledge.

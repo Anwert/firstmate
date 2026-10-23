@@ -877,6 +877,40 @@ test_local_only_truly_unpushed_refuses() {
   pass "local-only worktree with truly unpushed work is refused (safety preserved)"
 }
 
+# A merged task whose production step is still listed keeps its worker, even
+# under --force; the same task tears down once its entry is gone, and a file
+# that only names a longer id sharing this one's prefix does not hold it.
+test_pending_release_action_refuses_until_removed() {
+  local case_dir rc wt_head
+  case_dir=$(make_case release-action)
+  write_meta "$case_dir" local-only ship
+  wt_commit "$case_dir" "merged work"
+  wt_head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  git -C "$case_dir/project" update-ref refs/heads/main "$wt_head"
+  mkdir -p "$case_dir/data"
+  printf '%s\n' '# Release actions' '' '## the partials script' \
+    '- After release: its worker task-x1 registers the script in the back office.' \
+    > "$case_dir/data/release-actions.md"
+
+  set +e
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "release-action: teardown should refuse while the task has a release step"
+  grep -F 'release-actions.md' "$case_dir/stderr" >/dev/null \
+    || fail "release-action: refusal did not name the release-actions file: $(cat "$case_dir/stderr")"
+  assert_refusal_retained_task_state "$case_dir" release-action "$wt_head"
+
+  printf '%s\n' '# Release actions' '' '- Its worker task-x10 stays alive.' \
+    > "$case_dir/data/release-actions.md"
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 0 "$rc" "release-action: teardown should proceed once only another task is listed: $(cat "$case_dir/stderr")"
+  pass "a task listed in release-actions.md keeps its worker until its entry is removed"
+}
+
 test_local_only_merged_to_local_main_allows() {
   local case_dir rc
   case_dir=$(make_case merged-main)
@@ -5974,6 +6008,7 @@ test_teardown_closes_a_gitlab_task_with_its_merge_request_url_as_a_note
 test_teardown_manual_backend_leaves_the_backlog_to_the_operator
 test_local_only_truly_unpushed_refuses
 test_local_only_merged_to_local_main_allows
+test_pending_release_action_refuses_until_removed
 test_no_mistakes_origin_remote_allows
 test_no_mistakes_truly_unpushed_refuses
 test_local_only_force_overrides_unpushed
