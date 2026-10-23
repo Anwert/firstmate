@@ -597,8 +597,8 @@ hold_key() {
   printf '%s' test:fm-held-merge | tr ':/.' '___'
 }
 
-make_hold_home() {  # <name> <status-line> <hold|nohold>
-  local name=$1 line=$2 hold=$3 dir state
+make_hold_home() {  # <name> <status-line> <hold|nohold> [hold-reason]
+  local name=$1 line=$2 hold=$3 reason=${4:-awaiting the captain on the merge} dir state
   dir=$(make_case "$name"); state="$dir/state"
   mkdir -p "$dir/data" "$dir/config"
   fm_test_tasks_toml "$dir/.tasks.toml" || return 1
@@ -606,7 +606,7 @@ make_hold_home() {  # <name> <status-line> <hold|nohold>
   (cd "$dir" && tasks-axi add held-merge 'delivered work' --file data/backlog.md) >/dev/null 2>&1 \
     || return 1
   if [ "$hold" = hold ]; then
-    run_hold "$dir" hold held-merge --reason 'awaiting the captain on the merge' || return 1
+    run_hold "$dir" hold held-merge --reason "$reason" || return 1
   fi
   printf 'window=test:fm-held-merge\nkind=ship\nharness=grok\nbackend=tmux\n' \
     > "$state/held-merge.meta"
@@ -747,6 +747,36 @@ test_stale_churn_without_a_captain_call_still_alarms() {
   pass "a stale window with no open captain call keeps alarming on every new hash"
 }
 
+
+# A hold whose reason starts with a prefix the home lists in
+# config/captain-in-pane-holds says the captain is working in that pane, so not
+# even the first sight alarms; a hold with any other reason keeps the bound above.
+test_captain_in_pane_hold_silences_stale() {
+  local spec name line dir state out capture wakes pid
+  command -v tasks-axi >/dev/null 2>&1 \
+    || { echo "skip: tasks-axi not found (captain-in-pane stale silence)"; return 0; }
+  for spec in \
+    'in-pane-delivery|done: PR https://example.invalid/pull/1 checks green' \
+    'in-pane-worker-line|working: answering the captain'
+  do
+    name=${spec%%|*}; line=${spec#*|}
+    dir=$(make_hold_home "$name" "$line" hold 'next review: the fix diff') \
+      || fail "[$name] could not build a captain-in-pane backlog fixture"
+    state="$dir/state"; out="$dir/watch.out"; capture="$dir/pane.txt"
+    printf 'next grill:\nnext review:\n' > "$dir/config/captain-in-pane-holds"
+    hold_watch_churn "$dir" "$out" "$capture" 'idle, captain typing' 2 \
+      || fail "[$name] watcher exited while the captain worked in the pane: $(cat "$out")"
+    wakes=$(hold_stale_wakes "$state")
+    [ "$wakes" -eq 0 ] || fail "[$name] a captain-in-pane hold still alarmed $wakes time(s)"
+
+    printf 'next merge:\n' > "$dir/config/captain-in-pane-holds"
+    hold_watch_surface "$dir" "$out" "$capture" 'idle, captain gone' \
+      || fail "[$name] an unlisted hold prefix lost its first-sight alarm"
+    wakes=$(hold_stale_wakes "$state")
+    [ "$wakes" -eq 1 ] || fail "[$name] an unlisted hold prefix produced $wakes wakes instead of one"
+  done
+  pass "a hold naming the captain in the pane silences its stale alarms; other holds keep the first sight"
+}
 
 # The cadence marker may never outlive the wake it claims to record. Recording it
 # before publishing the durable wake turned a delayed alarm into a lost one: the
@@ -1479,6 +1509,7 @@ fm_test_run \
   test_live_paused_until_controls_recheck_time \
   test_open_captain_call_bounds_stale_churn \
   test_stale_churn_without_a_captain_call_still_alarms \
+  test_captain_in_pane_hold_silences_stale \
   test_failed_wake_append_does_not_arm_the_captain_hold_throttle \
   test_reheld_captain_call_starts_its_own_resurface_window \
   test_secondmate_paused_resurfaces_in_normal_mode \

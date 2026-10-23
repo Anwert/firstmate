@@ -955,6 +955,13 @@ The flag is a home-local supervision-noise preference and is not inherited by se
 
 [`architecture.md`](architecture.md) owns the wait-evidence contract and which records may take the ladder away; `bin/fm-watch.sh`'s `wedge_wait_evidence` owns the exact derivation and its fail-closed boundaries.
 
+## Captain-in-pane holds (config/captain-in-pane-holds)
+
+The optional local, gitignored `config/captain-in-pane-holds` file lists one captain-hold reason prefix per line, such as `next review:`, that this home uses to say the captain is working in that task's pane right now.
+While a task's open captain hold starts with a listed prefix, the watcher raises no stale alarm for its pane, first sight included, and its wedge timer absorbs the quiet the same way it does while the away-posture record exists.
+Any other hold keeps the ordinary first-sight alarm and `FM_PAUSE_RESURFACE_SECS` bound, and a home without the file spends no extra backlog read.
+`bin/fm-watch.sh`'s `captain_in_pane` owns the match.
+
 ## Wedge evidence guards (config/wedge-evidence-guards)
 
 The optional local, gitignored `config/wedge-evidence-guards` file opts this home into consulting operator-owned [Jev guards](jev-guards.md) before the watcher wedge-escalates a quiet live pane.

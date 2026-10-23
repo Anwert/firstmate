@@ -30,7 +30,7 @@
 #   fm-captain-hold.sh binding <source-id>
 #   fm-captain-hold.sh complete <origin-id> (--none | <task-id>...)
 #   fm-captain-hold.sh verify <origin-id>
-#   fm-captain-hold.sh open <task-id> [--identity] [--distinguish-absent]
+#   fm-captain-hold.sh open <task-id> [--identity] [--reason] [--distinguish-absent]
 #   fm-captain-hold.sh diverged
 #   fm-captain-hold.sh reconcile list
 #   fm-captain-hold.sh reconcile close <task-id> --evidence-file <path>
@@ -191,6 +191,8 @@
 # successive calls on one task id: re-holding released work starts a new
 # lifecycle without necessarily touching the task's status log, so a consumer
 # that bounds repeated work per call cannot use the task id alone.
+# `--reason` prints the call's decoded hold reason on its own line, after the
+# identity when both are asked, also on an exit 0 only.
 # bin/fm-teardown.sh asks it before its automatic
 # backlog close and, on 0, returns the row to Queued with its deliverable
 # recorded instead (bin/fm-backlog-transition-lib.sh owns that transition), so
@@ -2192,11 +2194,12 @@ EOF
 # exist holds nothing. Every read failure over a record that DOES exist is a 2,
 # printed to stderr, because a mechanical closer must never read "cannot tell"
 # as permission to close.
-command_open() {  # <task-id> [--identity] [--distinguish-absent]
-  local id='' identity=0 distinguish_absent=0 data state root file backend show shown_body
+command_open() {  # <task-id> [--identity] [--reason] [--distinguish-absent]
+  local id='' identity=0 want_reason=0 distinguish_absent=0 data state root file backend show shown_body
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --identity) identity=1 ;;
+      --reason) want_reason=1 ;;
       --distinguish-absent) distinguish_absent=1 ;;
       -*) usage >&2; exit 2 ;;
       *)
@@ -2235,16 +2238,24 @@ command_open() {  # <task-id> [--identity] [--distinguish-absent]
   if fm_backlog_row_probe "$data" "$id"; then
     state=${FM_BACKLOG_ROW_STATE%% *}
     if [ "$state" != "done" ] && [ "$FM_BACKLOG_ROW_HOLD_KIND" = captain ]; then
-      if [ "$identity" -eq 1 ]; then
+      if [ "$identity" -eq 1 ] || [ "$want_reason" -eq 1 ]; then
         task_show "$id" || {
           printf 'fm-captain-hold: captain call %s is open but its record could not be read\n' "$id" >&2
           exit 2
         }
         show=$TASK_SHOW_OUTPUT
+      fi
+      if [ "$identity" -eq 1 ]; then
         shown_body=$(show_field "$show" body)
         printf '%s#%s\n' \
           "$(body_hold_set_timestamp "$(decode_shown_value "$shown_body")")" \
           "$(resolution_record_count "$shown_body")"
+      fi
+      if [ "$want_reason" -eq 1 ]; then
+        printf 'task:\n  hold_reason: %s\n' "$(show_field "$show" hold_reason)" \
+          | fm_hold_reason_decode_stream | sed -n 's/^  hold_reason: //p' \
+          | { IFS= read -r shown_reason || true; decode_shown_value "$shown_reason"; }
+        printf '\n'
       fi
       return 0
     fi

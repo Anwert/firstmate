@@ -1673,6 +1673,7 @@ wait_record() {  # <kind> <subject> <whom> <action> <age-record>
 # `needs-decision` at all, and only in the at-threshold branch - at most once per
 # window per STALE_ESCALATE_SECS, never on an ordinary poll.
 WEDGE_BACKLOG_HOLD_KIND='captain hold'
+WEDGE_CAPTAIN_IN_PANE_KIND='captain in the pane'
 wedge_wait_evidence() {  # <task> -> one wait_record on stdout
   local task=$1 last until statusf run verb
   [ -n "$task" ] || return 1
@@ -1690,6 +1691,11 @@ wedge_wait_evidence() {  # <task> -> one wait_record on stdout
     return 0
   fi
   if task_captain_call_open "$task"; then
+    if captain_in_pane "$task"; then
+      wait_record "$WEDGE_CAPTAIN_IN_PANE_KIND" 'the captain is working in this pane' \
+        captain 'none while the hold names the captain in the pane' ''
+      return 0
+    fi
     wait_record "$WEDGE_BACKLOG_HOLD_KIND" 'awaiting the captain - held in the backlog' \
       captain 'answer the held decision or release the hold' ''
     return 0
@@ -1786,6 +1792,11 @@ EOF
     # timer to keep that read at one per STALE_ESCALATE_SECS instead of every poll.
     [ "$kind" != "$WEDGE_BACKLOG_HOLD_KIND" ] || date +%s > "$since_file"
     triage_log "absorbed $label ($kind, never rechecked while the away-posture record exists): $win"
+    return 0
+  fi
+  if [ "$kind" = "$WEDGE_CAPTAIN_IN_PANE_KIND" ]; then
+    date +%s > "$since_file"
+    triage_log "absorbed $label ($kind, never rechecked while that hold stands): $win"
     return 0
   fi
   mtime=''
@@ -2808,6 +2819,23 @@ EOF
   fi
 }
 
+# A captain call whose hold reason starts with a prefix listed one per line in
+# config/captain-in-pane-holds (such as `next review:`) says the captain is
+# working in that pane right now, so its quiet is theirs: no stale alarm fires
+# for it, first sight included, exactly as while the away-posture record exists.
+# A home without the file pays no read.
+captain_in_pane() {  # <task>
+  local task=$1 reason prefix
+  [ -n "$task" ] && [ -s "$CONFIG/captain-in-pane-holds" ] || return 1
+  reason=$(FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-captain-hold.sh" \
+    open "$task" --reason 2>/dev/null) || return 1
+  while IFS= read -r prefix || [ -n "$prefix" ]; do
+    [ -n "$prefix" ] || continue
+    case "$reason" in "$prefix"*) return 0 ;; esac
+  done < "$CONFIG/captain-in-pane-holds"
+  return 1
+}
+
 # The identity a re-surface throttle is bound to: the task's whole status-log
 # signature. Any new status event - a replacement wait, a fresh delivery, a
 # blocker - changes it and so starts its own window instead of inheriting the
@@ -2867,6 +2895,7 @@ captain_call_stale_bound() {  # <window-key> <task>
   task_captain_call_open "$task" || return 1
   STALE_WAIT_DECLARATION=$(captain_call_declaration "$task" "$CAPTAIN_CALL_IDENTITY")
   away_record_present && return 0
+  captain_in_pane "$task" && return 0
   stale_wait_throttled "$key" "$STALE_WAIT_DECLARATION"
 }
 
