@@ -1,7 +1,7 @@
 ---
 name: stuck-crewmate-recovery
 description: >-
-  Load when the session-start digest reports an ordinary direct report's endpoint dead or its metadata has no window, after a stale wake, looping pane, repeated confusion, an answered-by-brief question, an unresponsive crewmate, or a failed steer, after observing a defeated Claude or Codex bypass, and when a live crewmate reports its no-mistakes pipeline dead, unreachable, or timed out.
+  Load when the session-start digest reports an ordinary direct report's endpoint dead or its metadata has no window, after a stale wake, looping pane, repeated confusion, an answered-by-brief question, an unresponsive crewmate, a failed steer, or a worker blocked by a permission-classifier refusal, after observing a defeated Claude or Codex bypass, and when a live crewmate reports its no-mistakes pipeline dead, unreachable, or timed out.
 user-invocable: false
 metadata:
   internal: true
@@ -25,6 +25,11 @@ After observing a Codex command-approval prompt under bypass or a Claude policy 
 Only after that explicit word, load `harness-adapters` and use `FM_HOME=<owning-home> bin/fm-approval-failover.sh apply <id>`; its header owns persistent configuration and guarded recovery, with no automatic detection.
 Report the saved model-reviewed remedy and actual recovery result, preserving explicit settings and work rather than changing vendor policy or answering approval or hook-trust prompts.
 A `backend=t3code` worker already runs at T3's `full-access` runtime mode, so the command refuses it before changing anything; approve its pending request in T3 Code itself ([T3 pending-request procedure](../../../docs/t3code-backend.md#push-events-and-polling-fallback)) or move the work to another backend.
+
+## Permission-classifier refusals
+
+A session whose calls a permission classifier refused twice for the same kind of reason stays suspect to it, and later benign calls are refused too until the session is replaced.
+On the second such refusal in one worker, relaunch it through `bin/fm-control.sh <task-id> relaunch` rather than steering it to retry.
 
 ## Session-start reconciliation for a dead ordinary direct report
 
