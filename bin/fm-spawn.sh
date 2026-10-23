@@ -477,7 +477,9 @@
 #   holds one JSON object of Claude Code skillOverrides, such as
 #   {"deslop":"off"}, merged as "skillOverrides" into the worker's one inline
 #   --settings JSON so the named user-scope skills are hidden from that worker
-#   alone; plugin skills are outside skillOverrides' reach. A file that is not
+#   alone; plugin skills are outside skillOverrides' reach. An "$allow" array of
+#   skill names in the object is expanded at launch into "off" for every other
+#   installed user-scope skill (claude_skill_overrides_effective). A file that is not
 #   exactly one JSON object, a secondmate, or any other harness refuses the
 #   spawn before any endpoint, worktree, or record exists. The compact object
 #   is recorded as claude_skill_overrides= in the task record, which a relaunch
@@ -1304,8 +1306,8 @@ else
     fi
     # A single quote can only occur inside a JSON string, so its \u0027 escape
     # keeps the object valid while it rides inside the single-quoted --settings.
-    if ! CLAUDE_SKILL_OVERRIDES=$(jq -rs 'if length == 1 and (.[0] | type) == "object" then .[0] | tojson | gsub("'"'"'"; "\\u0027") else error("not one JSON object") end' "$CLAUDE_SKILL_OVERRIDES_FILE" 2>/dev/null) || [ -z "$CLAUDE_SKILL_OVERRIDES" ]; then
-      echo "error: --claude-skill-overrides file $CLAUDE_SKILL_OVERRIDES_FILE must hold exactly one JSON object of skillOverrides, such as {\"deslop\":\"off\"}" >&2
+    if ! CLAUDE_SKILL_OVERRIDES=$(jq -rs 'if length == 1 and (.[0] | type) == "object" and ((.[0] | has("$allow") | not) or (.[0]["$allow"] | type == "array" and all(type == "string"))) then .[0] | tojson | gsub("'"'"'"; "\\u0027") else error("not one JSON object") end' "$CLAUDE_SKILL_OVERRIDES_FILE" 2>/dev/null) || [ -z "$CLAUDE_SKILL_OVERRIDES" ]; then
+      echo "error: --claude-skill-overrides file $CLAUDE_SKILL_OVERRIDES_FILE must hold exactly one JSON object of skillOverrides, such as {\"deslop\":\"off\"}, whose optional \"\$allow\" is an array of skill names" >&2
       exit 1
     fi
   fi
@@ -3371,6 +3373,32 @@ if [ -n "$WORKER_ACCOUNT" ] && [ "$HARNESS" = claude ]; then
   else
     unset CLAUDE_CONFIG_DIR
   fi
+fi
+
+# An overrides object carrying "$allow" turns off every user-scope skill installed
+# under this launch's Claude config root that the list does not name. It is
+# expanded right after the account pin chose that root, on every spawn and
+# relaunch, so a skill installed later is hidden without regenerating the file;
+# the task record keeps the unexpanded object for the next relaunch.
+claude_skill_overrides_effective() {  # <compact-object>
+  local root="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills" dir
+  case "$1" in *'"'\$'allow"'*) ;; *) printf '%s' "$1"; return 0 ;; esac
+  for dir in "$root"/*/; do
+    [ -f "$dir/SKILL.md" ] || continue
+    dir=${dir%/}
+    printf '%s\n' "${dir##*/}"
+  done | jq -Rnr --argjson o "$1" '
+    [inputs | select(length > 0)] as $live
+    | ($o | del(.["$allow"])) + ([$live[] | select(. as $n | $o["$allow"] | index($n) | not) | {(.): "off"}] | add // {})
+    | tojson | gsub("'"'"'"; "\\u0027")'
+}
+CLAUDE_SKILL_OVERRIDES_LAUNCH=
+if [ -n "$CLAUDE_SKILL_OVERRIDES" ]; then
+  CLAUDE_SKILL_OVERRIDES_LAUNCH=$(claude_skill_overrides_effective "$CLAUDE_SKILL_OVERRIDES") \
+    && [ -n "$CLAUDE_SKILL_OVERRIDES_LAUNCH" ] || {
+    echo "error: could not expand the claude skill overrides' \$allow list against the installed skills" >&2
+    exit 1
+  }
 fi
 
 secondmate_registry_value() {
@@ -7253,7 +7281,7 @@ case "$LAUNCH" in
     LAUNCH=${LAUNCH//__CLAUDESETTINGS__/$(shell_quote "$STATE_REAL/$ID.claude-settings.json")}
   else
     claude_settings="'{\"feedbackDrafts\":\"off\"__CLAUDEATTRIBUTION__"
-    [ -z "$CLAUDE_SKILL_OVERRIDES" ] || claude_settings="$claude_settings,\"skillOverrides\":$CLAUDE_SKILL_OVERRIDES"
+    [ -z "$CLAUDE_SKILL_OVERRIDES_LAUNCH" ] || claude_settings="$claude_settings,\"skillOverrides\":$CLAUDE_SKILL_OVERRIDES_LAUNCH"
     claude_settings="$claude_settings}'"
     LAUNCH=${LAUNCH//__CLAUDESETTINGS__/"$claude_settings"}
   fi

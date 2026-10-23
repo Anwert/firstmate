@@ -1457,6 +1457,7 @@ Neither fallback is unrestricted execution, and Firstmate does not change vendor
 `bin/fm-spawn.sh --claude-skill-overrides <file>` hides named user-scope skills from one Claude ship or scout, for example to keep a pstack worker on pstack's skills while other workers keep the full set.
 The file is any path outside the project, holding exactly one JSON object of Claude Code `skillOverrides`, such as `{"deslop":"off","tdd":"off"}`.
 The spawn merges it as `skillOverrides` into the worker's one inline `--settings` JSON, so it reaches that worker alone and never `~/.claude`.
+The object may instead carry `"$allow": [<skill names>]`: at every spawn and relaunch the launch turns off each user-scope skill installed under its Claude config root that the list does not name, beside any explicit entries, so a skill installed later is hidden without regenerating the file; the task record keeps the unexpanded object.
 Plugin skills such as `pstack:*` are outside `skillOverrides`' reach, so an unqualified name never hides a plugin skill of the same name; a `permissions.deny` `Skill(<name>)` rule would, which is why it is not used.
 A file that is missing or not exactly one JSON object, a secondmate spawn, and any non-Claude harness refuse before any endpoint, worktree, or task record exists.
 The compact object is recorded as `claude_skill_overrides=` in the task record, a relaunch reuses it and refuses the flag, and a relaunch onto another harness refuses before the running agent stops.

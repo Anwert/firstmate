@@ -2785,6 +2785,39 @@ test_claude_skill_overrides_malformed_file_refuses_before_endpoint_or_metadata()
   pass "fm-spawn: a missing or non-object --claude-skill-overrides file refuses before any endpoint or metadata"
 }
 
+# An "$allow" list is expanded at launch against the user-scope skills installed
+# under the launch's Claude config root, so a skill added after the file was
+# written is hidden too; the task record keeps the unexpanded object.
+test_claude_skill_overrides_allow_list_hides_every_other_installed_skill() {
+  local rec id out status launch settings root
+  id=skillovr-allow-z34
+  rec=$(make_spawn_case skillovr-allow claude "$id")
+  read_case_record "$rec"
+  root="$CASE_DIR/claude-root"
+  mkdir -p "$root/skills/deslop" "$root/skills/pr" "$root/skills/added-later" "$root/skills/not-a-skill"
+  : > "$root/skills/deslop/SKILL.md"; : > "$root/skills/pr/SKILL.md"; : > "$root/skills/added-later/SKILL.md"
+  printf '%s\n' '{"$allow":["pr","test-on-stand"],"tdd":"off"}' > "$CASE_DIR/overrides.json"
+
+  out=$(FM_TEST_CLAUDE_CONFIG_DIR="$root" run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --claude-skill-overrides "$CASE_DIR/overrides.json")
+  status=$?
+  expect_code 0 "$status" "claude spawn with an allow list should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  settings=$(claude_settings_json_arg "$launch") || fail "claude launch carried no --settings"$'\n'"$launch"
+  printf '%s' "$settings" | jq -e '.skillOverrides == {"tdd":"off","deslop":"off","added-later":"off"}' >/dev/null \
+    || fail "the allow list did not hide exactly the other installed skills: $settings"
+  assert_grep '"$allow"' "$HOME_DIR/state/$id.meta" "the task record must keep the unexpanded allow list"
+
+  id=skillovr-allow-bad-z35
+  rec=$(make_spawn_case skillovr-allow-bad claude "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"$allow":"pr"}' > "$CASE_DIR/overrides.json"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --claude-skill-overrides "$CASE_DIR/overrides.json")
+  status=$?
+  expect_code 1 "$status" "an allow list that is not an array of names must refuse"
+  assert_absent "$HOME_DIR/state/$id.meta" "a malformed allow list must refuse before meta is written"
+  pass "fm-spawn: an \$allow list hides every other installed user skill at launch"
+}
+
 test_claude_skill_overrides_non_claude_harness_refuses() {
   local rec id out status
   id=skillovr-codex-z33
@@ -2881,6 +2914,7 @@ test_claude_skill_overrides_absent_keeps_launch_unchanged
 test_claude_skill_overrides_merge_into_ship_and_scout_settings
 test_claude_skill_overrides_malformed_file_refuses_before_endpoint_or_metadata
 test_claude_skill_overrides_non_claude_harness_refuses
+test_claude_skill_overrides_allow_list_hides_every_other_installed_skill
 test_non_claude_harness_ignores_config_dir
 test_claude_task_launch_carries_control_channel_authority
 test_claude_secondmate_launch_omits_task_control_channel_authority
