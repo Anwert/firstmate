@@ -21,7 +21,10 @@
 #   signal: <file>...      status/turn-end signals, surfaced when a listed status
 #                          span has a captain-relevant event OR a no-verb signal lacks
 #                          positive execution evidence, unless afk is active
-#   stale: <window>        a provably-working stale is ALWAYS absorbed (with a wedge
+#   stale: <window> (<trigger>)
+#                          every stale reason names what tripped it in its
+#                          parenthetical; fm_wake_append marks one that does not as
+#                          a watcher bug. A provably-working stale is ALWAYS absorbed (with a wedge
 #                          timer) regardless of what the status log says - an active
 #                          run-step or busy pane outranks even a captain-relevant log
 #                          line, since the crew's own log gets no new entry once
@@ -50,8 +53,8 @@
 #                          exit picker, that same parenthetical ends with
 #                          "blocked-on-prompt:" and the picker's name, after the
 #                          demand-deep-inspection clause when that clause is
-#                          present; a plain stale reason gains the parenthetical
-#                          to carry the name, and no other reason carries it: the
+#                          present; a plain stale reason carries the name inside
+#                          its trigger parenthetical, and no other reason carries it: the
 #                          deferral, dead-record and declared-wait recheck
 #                          reasons below keep their wording.
 #                          Unless afk is active. A pane about to escalate
@@ -2517,7 +2520,7 @@ handle_paused_stale() {  # <window> <task> <hash>
 # than the ladder, because who owes that answer does not depend on what the pane
 # is rendering, and the recheck names that supervisor and the action that clears
 # it. An unconfigured home keeps the unchanged ladder there.
-# Away mode remains daemon-owned and receives the undecorated wake identity for
+# Away mode remains daemon-owned and receives the wake without the wedge decoration for
 # its own classification, which is why the declaration is read before the afk
 # branch rather than after it.
 busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-file> [dialog-name]
@@ -2526,9 +2529,9 @@ busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-fil
   statusf="$STATE/$task.status"
   if status_is_paused_or_captain_held "$(status_declared_wait_line "$statusf")"; then
     if afk_present; then
-      # Away mode is daemon-owned, so this bound hands off the PLAIN wake identity
-      # and lets the daemon classify the declaration itself - the undecorated
-      # identity the rest of this function's contract promises. Running the wedge
+      # Away mode is daemon-owned, so this bound hands off the wake with only its
+      # trigger named and lets the daemon classify the declaration itself - the
+      # identity without the wedge decoration this function's contract promises. Running the wedge
       # timer here instead would decorate the wake as a possible wedge, and that
       # decoration overrides the daemon's own pause verdict for the pane: the
       # ladder then climbs on every re-arm, escalating a crew that declared the
@@ -2555,9 +2558,9 @@ busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-fil
         return 0
       fi
       if [ "$(cat "$STATE/.stale-$key" 2>/dev/null || true)" != "$declared" ]; then
-        fm_wake_append stale "$win" "stale: $win" || exit 1
+        fm_wake_append stale "$win" "stale: $win (busy past the turn bound under a declared wait)" || exit 1
         printf '%s' "$declared" > "$STATE/.stale-$key"
-        wake "stale: $win"
+        wake "stale: $win (busy past the turn bound under a declared wait)"
       fi
       return 0
     fi
@@ -2920,11 +2923,13 @@ captain_call_stale_bound() {  # <window-key> <task>
 # recorded once the captain took the work in hand.
 surface_nonterminal_stale() {  # <window> <hash> [dialog-name]
   local win=$1 h=$2 dialog=${3-} key task last declared=1 bounded=1 throttled=1 until now reason=''
+  local trigger='idle, and no status or crew state explains the quiet'
   key=$(window_key "$win")
   task=$(window_to_task "$win" "$STATE")
   last=$(status_declared_wait_line "$STATE/$task.status")
   STALE_WAIT_DECLARATION=
   if status_is_paused "$last"; then
+    trigger="idle under the worker's declared wait, rechecked"
     declared=0
     bounded=0
     STALE_WAIT_DECLARATION=$(stale_wait_declaration "$task")
@@ -2940,6 +2945,7 @@ surface_nonterminal_stale() {  # <window> <hash> [dialog-name]
       stale_wait_throttled "$key" "$STALE_WAIT_DECLARATION" && throttled=0
     fi
   elif status_is_captain_held "$last"; then
+    trigger='idle after the worker handed the call to the captain, rechecked'
     declared=0
     bounded=0
     STALE_WAIT_DECLARATION=$(stale_wait_declaration "$task")
@@ -2955,10 +2961,15 @@ surface_nonterminal_stale() {  # <window> <hash> [dialog-name]
     bounded=0
     throttled=0
   elif [ -n "$STALE_WAIT_DECLARATION" ]; then
+    # An unknown-alive first sight leaves its own declaration set too, and it is not a captain hold.
+    case "$STALE_WAIT_DECLARATION" in
+      unknown-alive:*) ;;
+      *) trigger='idle while its task is held for the captain' ;;
+    esac
     bounded=0
   fi
   if [ "$throttled" -ne 0 ]; then
-    reason=$(stale_reason_naming_dialog "stale: $win" "$dialog")
+    reason=$(stale_reason_naming_dialog "stale: $win ($trigger)" "$dialog")
     fm_wake_append stale "$win" "$reason" || exit 1
     stale_wait_record "$key"
   fi
@@ -4328,7 +4339,7 @@ EOF
             printf '%s' "$h" > "$sf"
             triage_log "absorbed stale (captain-held, never rechecked while the away-posture record exists): $w"
           elif [ "$(cat "$sf" 2>/dev/null || true)" != "$h" ]; then
-            stale_reason=$(stale_reason_naming_dialog "stale: $w" "$dialog")
+            stale_reason=$(stale_reason_naming_dialog "stale: $w (idle on a screen not seen before)" "$dialog")
             fm_wake_append stale "$w" "$stale_reason" || exit 1
             printf '%s' "$h" > "$sf"
             _wedge_cap_markers_clear "$key"
@@ -4371,7 +4382,7 @@ EOF
               clear_write_tracking "$key"
               triage_log "absorbed stale (open captain call already surfaced for this status): $w"
             else
-              stale_reason=$(stale_reason_naming_dialog "stale: $w" "$dialog")
+              stale_reason=$(stale_reason_naming_dialog "stale: $w (idle after a captain-relevant status nobody has acted on)" "$dialog")
               fm_wake_append stale "$w" "$stale_reason" || exit 1
               stale_wait_record "$key"
               printf '%s' "$h" > "$sf"

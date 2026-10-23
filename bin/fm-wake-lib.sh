@@ -2617,6 +2617,14 @@ fm_wake_append_locked() {
     *) printf 'fm_wake_append: invalid wake kind: %s\n' "$kind" >&2; return 2 ;;
   esac
 
+  # A stale wake that names no trigger costs firstmate a full pane inspection to
+  # triage, so a caller that forgot one is named as the bug instead of queued bare.
+  if [ "$kind" = stale ]; then
+    case "$payload" in
+      *" ("*")") ;;
+      *) payload="$payload (no trigger named: watcher bug, inspect the pane)" ;;
+    esac
+  fi
   clean_key=$(printf '%s' "$key" | fm_wake_clean_field)
   clean_payload=$(printf '%s' "$payload" | fm_wake_clean_field)
   epoch=$(date +%s)

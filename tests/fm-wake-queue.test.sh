@@ -138,6 +138,24 @@ test_concurrent_append_and_drain() {
   pass "concurrent append plus drain preserves durable records through acknowledgement"
 }
 
+# A stale wake must say what tripped it: a bare one is queued, never lost, but
+# marked as the watcher bug it is, while a named trigger passes through untouched.
+test_bare_stale_wake_is_marked_as_a_watcher_bug() {
+  local dir state
+  dir=$(make_case bare-stale)
+  state="$dir/state"
+  append_wake "$state" stale test:bare 'stale: test:bare' || fail "bare stale append failed"
+  append_wake "$state" stale test:named 'stale: test:named (idle after a captain-relevant status nobody has acted on)' \
+    || fail "named stale append failed"
+  awk -F '\t' '$4 == "test:bare" { print $5 }' "$state/.wake-queue" \
+    | grep -Fx 'stale: test:bare (no trigger named: watcher bug, inspect the pane)' >/dev/null \
+    || fail "a bare stale wake was queued without naming the missing trigger: $(cat "$state/.wake-queue")"
+  awk -F '\t' '$4 == "test:named" { print $5 }' "$state/.wake-queue" \
+    | grep -Fx 'stale: test:named (idle after a captain-relevant status nobody has acted on)' >/dev/null \
+    || fail "a named stale trigger was rewritten: $(cat "$state/.wake-queue")"
+  pass "a stale wake without a trigger is queued and named as a watcher bug"
+}
+
 test_signal_catchup_without_running_watcher() {
   local dir state fakebin out drain_out drain_err status_file sequence generation watcher
   dir=$(make_case signal)
@@ -201,7 +219,7 @@ test_stale_enqueue_before_suppressor() {
   printf '1\n' > "$state/.count-$key"
   PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
   wait_for_exit "$!" 40 || fail "watcher did not exit for stale pane"
-  grep -Fx "stale: $window" "$out" >/dev/null || fail "watcher did not print stale wake"
+  grep -E "^stale: $window \(.+\)$" "$out" >/dev/null || fail "watcher did not print stale wake"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" || fail "drain after stale wake failed"
   grep "$(printf '\tstale\t')" "$drain_out" | grep -F "$window" >/dev/null || fail "stale wake was not queued"
   [ "$(cat "$state/.stale-$key" 2>/dev/null || true)" = "$pane_hash" ] || fail "stale suppressor was not written"
@@ -238,7 +256,7 @@ test_not_working_stale_enqueue_before_suppressor() {
     FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
     FM_STALE_ESCALATE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
   wait_for_exit "$!" 40 || fail "watcher did not surface a not-provably-working stale"
-  grep -Fx "stale: $window" "$out" >/dev/null || fail "watcher did not print the immediate stale wake"
+  grep -E "^stale: $window \(.+\)$" "$out" >/dev/null || fail "watcher did not print the immediate stale wake"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" || fail "drain after the immediate stale wake failed"
   grep "$(printf '\tstale\t')" "$drain_out" | grep -F "$window" >/dev/null || fail "immediate stale wake was not queued"
   [ "$(cat "$state/.stale-$key" 2>/dev/null || true)" = "$pane_hash" ] || fail "stale suppressor was not advanced after the enqueue"
@@ -3776,6 +3794,7 @@ test_main_drain_excludes_rows_already_granted_to_branch
 test_branch_ack_commits_secondmate_stall_receipts
 test_main_is_never_told_to_drain_rows_only_the_branch_owns
 test_uncountable_queue_still_raises_the_pending_alarm
+test_bare_stale_wake_is_marked_as_a_watcher_bug
 test_unconsumable_rows_are_retired_instead_of_wedging_the_queue
 test_branch_grant_refuses_rows_already_claimed_by_main
 test_main_ack_leaves_a_row_that_arrived_after_its_drain_unclaimed
