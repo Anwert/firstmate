@@ -1509,6 +1509,12 @@ On Claude, a spawn or relaunch whose flow requires a plugin skill (`<plugin>:<sk
 `bin/fm-flow-check.sh <task-id>` reads the worker's own transcripts since its latest spawn or relaunch and names every departure, and the wake drain prints that verdict in a `FLOW CHECK` section once per new done or needs-decision event of such a task, beside the result about to be relayed.
 The script's header owns the file's keys and the transcript selection.
 
+## Jira status walk (config/jira-walk.json)
+
+The optional local, gitignored `config/jira-walk.json` lets `bin/fm-jira-walk.sh <issue-key> <target-status>` move a Jira issue through the transitions Jira offers, one at a time along a configured status path, and read the exact status back after every move.
+A target listed under `merged_required` is refused until the issue's merge request reports merged.
+The file names the authenticated REST command the walk calls; the script's header owns the keys.
+
 ## Worker account pin (config/claude-account, config/pi-account)
 
 A home that mixes accounts for one runner, such as a work login and a personal one, can pin the account its own Claude and Pi workers launch on.
