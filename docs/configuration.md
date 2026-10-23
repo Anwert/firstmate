@@ -1505,6 +1505,7 @@ Each relaunch installs a fresh worker extension with the home's current list, so
 
 The optional local, gitignored `config/flow-checks.json` names delivery flows, each with the skills a Claude worker must invoke, the skills and subagents it may use, and the todo list it must keep.
 A ship or scout spawned with `--flow <name>` records `flow=` in its task record, and a flow with no object in the file refuses the spawn.
+On Claude, a spawn or relaunch whose flow requires a plugin skill (`<plugin>:<skill>`) refuses before launch unless that plugin is enabled in the launch's `settings.json` and its installed copy holds the skill.
 `bin/fm-flow-check.sh <task-id>` reads the worker's own transcripts since its latest spawn or relaunch and names every departure, and the wake drain prints that verdict in a `FLOW CHECK` section once per new done or needs-decision event of such a task, beside the result about to be relayed.
 The script's header owns the file's keys and the transcript selection.
 

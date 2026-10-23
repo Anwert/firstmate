@@ -489,7 +489,10 @@
 #   Opt-in per ship or scout spawn. The name must have an object in
 #   config/flow-checks.json; it is recorded as flow= in the task record, which a
 #   relaunch reuses, so bin/fm-flow-check.sh and the wake drain can check the
-#   worker against that flow without being told it again.
+#   worker against that flow without being told it again. On claude, every
+#   "<plugin>:<skill>" the flow requires must be enabled and installed under the
+#   launch's config root, or the spawn or relaunch refuses before any endpoint
+#   (claude_flow_plugin_skills_missing).
 # Worker tool exclusions:
 #   docs/configuration.md "Worker tool exclusions" owns config/crew-exclude-tools
 #   and its operator contract. Resolve it with bin/fm-exclude-tools-lib.sh
@@ -3428,6 +3431,34 @@ if [ -n "$CLAUDE_SKILL_OVERRIDES" ]; then
   CLAUDE_SKILL_OVERRIDES_LAUNCH=$(claude_skill_overrides_effective "$CLAUDE_SKILL_OVERRIDES") \
     && [ -n "$CLAUDE_SKILL_OVERRIDES_LAUNCH" ] || {
     echo "error: could not expand the claude skill overrides' \$allow list against the installed skills" >&2
+    exit 1
+  }
+fi
+
+# A flow whose required skills live in Claude plugins ("<plugin>:<skill>") is
+# launched only when this launch's Claude config root enables that plugin and its
+# installed copy holds the skill, so a worker never starts without the flow it
+# was briefed for. Read on every spawn and relaunch, before any endpoint exists.
+claude_flow_plugin_skills_missing() {  # <flow>
+  local root="${CLAUDE_CONFIG_DIR:-$HOME/.claude}" skill plugin key path
+  jq -r --arg f "$1" '.[$f].require_skills[]? | select(contains(":"))' "$CONFIG/flow-checks.json" 2>/dev/null \
+    | while IFS= read -r skill; do
+      plugin=${skill%%:*}
+      key=$(jq -r --arg p "$plugin" '.enabledPlugins // {} | to_entries[] | select(.value == true and (.key | startswith($p + "@"))) | .key' \
+        "$root/settings.json" 2>/dev/null | head -1)
+      if [ -z "$key" ]; then
+        printf '%s (plugin %s is not enabled in %s/settings.json)\n' "$skill" "$plugin" "$root"
+        continue
+      fi
+      path=$(jq -r --arg k "$key" '.plugins[$k][]?.installPath // empty' "$root/plugins/installed_plugins.json" 2>/dev/null | head -1)
+      [ -n "$path" ] && [ -f "$path/skills/${skill#*:}/SKILL.md" ] \
+        || printf '%s (plugin %s has no installed copy of that skill)\n' "$skill" "$key"
+    done
+}
+if [ -n "$FLOW" ] && [ "$HARNESS" = claude ]; then
+  FLOW_PLUGIN_MISSING=$(claude_flow_plugin_skills_missing "$FLOW")
+  [ -z "$FLOW_PLUGIN_MISSING" ] || {
+    printf 'error: flow %s needs skills this Claude launch cannot load: %s\n' "$FLOW" "$(printf '%s' "$FLOW_PLUGIN_MISSING" | tr '\n' ';')" >&2
     exit 1
   }
 fi

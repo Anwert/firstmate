@@ -2844,6 +2844,38 @@ test_flow_is_recorded_and_unknown_flow_refuses() {
   pass "fm-spawn: --flow is recorded for the flow check, and a flow without rules refuses"
 }
 
+# A flow that requires a plugin skill launches only when the launch's Claude
+# config root enables that plugin and its installed copy holds the skill.
+test_flow_plugin_skill_must_resolve_before_launch() {
+  local rec id out status root
+  id=flow-plugin-ok-z38
+  rec=$(make_spawn_case flow-plugin-ok claude "$id")
+  read_case_record "$rec"
+  root="$CASE_DIR/claude-root"
+  mkdir -p "$HOME_DIR/config" "$root/plugins" "$CASE_DIR/pstack/skills/poteto-mode"
+  : > "$CASE_DIR/pstack/skills/poteto-mode/SKILL.md"
+  printf '%s\n' '{"pstack":{"require_skills":["pstack:poteto-mode"]}}' > "$HOME_DIR/config/flow-checks.json"
+  printf '%s\n' '{"enabledPlugins":{"pstack@market":true}}' > "$root/settings.json"
+  jq -n --arg p "$CASE_DIR/pstack" '{plugins: {"pstack@market": [{installPath: $p}]}}' > "$root/plugins/installed_plugins.json"
+  out=$(FM_TEST_CLAUDE_CONFIG_DIR="$root" run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --flow pstack)
+  status=$?
+  expect_code 0 "$status" "a flow whose plugin skill resolves should launch"$'\n'"$out"
+
+  id=flow-plugin-off-z39
+  rec=$(make_spawn_case flow-plugin-off claude "$id")
+  read_case_record "$rec"
+  mkdir -p "$HOME_DIR/config"
+  printf '%s\n' '{"pstack":{"require_skills":["pstack:poteto-mode"]}}' > "$HOME_DIR/config/flow-checks.json"
+  printf '%s\n' '{"enabledPlugins":{"pstack@market":false}}' > "$root/settings.json"
+  out=$(FM_TEST_CLAUDE_CONFIG_DIR="$root" run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --flow pstack)
+  status=$?
+  expect_code 1 "$status" "a flow whose plugin is disabled must refuse"
+  assert_contains "$out" "pstack:poteto-mode (plugin pstack is not enabled" "the refusal must name the missing plugin skill"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused flow launch must launch nothing"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused flow launch must leave no record"
+  pass "fm-spawn: a flow launches only when its plugin skills resolve for the launch's Claude root"
+}
+
 test_claude_skill_overrides_non_claude_harness_refuses() {
   local rec id out status
   id=skillovr-codex-z33
@@ -2942,6 +2974,7 @@ test_claude_skill_overrides_malformed_file_refuses_before_endpoint_or_metadata
 test_claude_skill_overrides_non_claude_harness_refuses
 test_claude_skill_overrides_allow_list_hides_every_other_installed_skill
 test_flow_is_recorded_and_unknown_flow_refuses
+test_flow_plugin_skill_must_resolve_before_launch
 test_non_claude_harness_ignores_config_dir
 test_claude_task_launch_carries_control_channel_authority
 test_claude_secondmate_launch_omits_task_control_channel_authority
