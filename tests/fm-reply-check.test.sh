@@ -26,14 +26,15 @@ check_text() {
   FM_HOME="$1" FM_STATE_OVERRIDE="$1/state" FM_CONFIG_OVERRIDE="$1/config" "$CHECK_BIN" --text
 }
 
-# Hook payload for a transcript whose last assistant message is <reply>.
-run_hook() {  # <home> <cwd> <stop-hook-active> <reply>
+# Stop payload whose last_assistant_message is <reply>, over a transcript that
+# has not caught up yet and still ends at the previous reply, <stale>.
+run_hook() {  # <home> <cwd> <stop-hook-active> <reply> [<stale>]
   local home=$1 transcript="$1/transcript.jsonl"
-  jq -nc '{type: "assistant", message: {content: [{type: "text", text: "earlier turn"}]}}' > "$transcript"
+  jq -nc --arg t "${5:-earlier turn}" '{type: "assistant", message: {content: [{type: "text", text: $t}]}}' > "$transcript"
   jq -nc '{type: "user", message: {content: "status?"}}' >> "$transcript"
-  jq -nc --arg t "$4" '{type: "assistant", message: {content: [{type: "text", text: $t}]}}' >> "$transcript"
-  jq -nc --arg c "$2" --arg t "$transcript" --argjson a "$3" \
-    '{hook_event_name: "Stop", cwd: $c, transcript_path: $t, stop_hook_active: $a}' \
+  jq -nc --arg c "$2" --arg t "$transcript" --argjson a "$3" --arg m "$4" \
+    '{hook_event_name: "Stop", cwd: $c, transcript_path: $t, stop_hook_active: $a}
+     + (if $m == "" then {} else {last_assistant_message: $m} end)' \
     | FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_CONFIG_OVERRIDE="$home/config" "$CHECK_BIN"
 }
 
@@ -54,6 +55,22 @@ test_text_mode_names_each_broken_rule() {
   pass "text mode names bare identifiers, homework, and a closing ask, and passes a clean reply"
 }
 
+test_homework_spares_a_relayed_worker_finding() {
+  local home out
+  home=$(make_home relay)
+  out=$(printf 'По тарифу расхождение подтверждено кодом. Лимиты компании скаут в скоринге не нашёл. Рекомендую в риск не нести.\n' \
+    | check_text "$home") || fail "a scout finding relayed to the captain was flagged: $out"
+  out=$(printf 'Воркер прогнал E2E, но причину флака не нашёл.\n' | check_text "$home") \
+    || fail "a worker finding relayed to the captain was flagged: $out"
+  out=$(printf 'Скаут вернулся с отчётом. За пару попыток не нашёл, где падает.\n' | check_text "$home") \
+    && fail "firstmate giving up in its own sentence passed: $out"
+  printf '%s\n' "$out" | grep -F '"не нашёл" hands' >/dev/null || fail "own homework missed beside a scout mention: $out"
+  out=$(printf 'В отчёте скаута не нашёл лимитов.\n' | check_text "$home") \
+    && fail "a scout named only as the place firstmate searched excused its failure: $out"
+  printf '%s\n' "$out" | grep -F '"не нашёл" hands' >/dev/null || fail "own homework in a scout report missed: $out"
+  pass "a homework phrase fires on firstmate's own step, not on a worker's or scout's relayed finding"
+}
+
 test_hook_blocks_only_the_primary_session_once() {
   local home out
   home=$(make_home hook)
@@ -66,11 +83,16 @@ test_hook_blocks_only_the_primary_session_once() {
   [ -z "$out" ] || fail "a session outside the primary home was checked: $out"
   out=$(run_hook "$home" "$home" false 'Фикс overdraft зелёный, MR на ревью у тебя.')
   [ -z "$out" ] || fail "a clean reply was blocked: $out"
+  out=$(run_hook "$home" "$home" false 'Фикс overdraft зелёный, MR на ревью у тебя.' 'Готово: BACK-1. Делать?')
+  [ -z "$out" ] || fail "the previous reply still at the transcript's end was judged: $out"
+  out=$(run_hook "$home" "$home" false '' 'Готово: BACK-1. Делать?')
+  [ -z "$out" ] || fail "a payload without last_assistant_message was judged from the transcript: $out"
   rm "$home/config/reply-check.json"
   out=$(run_hook "$home" "$home" false 'Готово: BACK-1. Делать?')
   [ -z "$out" ] || fail "a home without rules was checked: $out"
-  pass "the hook sends a breaking reply back once, only in the primary session, only where rules exist"
+  pass "the hook judges only this turn's final reply, sends it back once, only in the primary session, only where rules exist"
 }
 
 test_text_mode_names_each_broken_rule
+test_homework_spares_a_relayed_worker_finding
 test_hook_blocks_only_the_primary_session_once

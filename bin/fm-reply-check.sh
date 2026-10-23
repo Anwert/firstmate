@@ -9,17 +9,22 @@
 #    "task_ids": true,
 #    "min_words": 3,
 #    "homework_phrases": ["не нашёл", "дальше не стал", "не получилось"],
+#    "homework_reporters": ["скаут", "воркер", "scout", "worker"],
 #    "ask_endings": ["запускаю?", "делать?", "создавать?"]}
 # A line naming an identifier - a match of id_patterns, or with task_ids a task id
 # recorded in state/*.meta - is flagged when fewer than min_words plain words
 # remain on it once identifiers, URLs, and code spans are removed. A
-# homework_phrases entry anywhere is flagged, and so is a reply whose last
-# non-blank line ends with an ask_endings entry, because work the captain
-# already chose is started and reported, not asked about again. Matching
-# ignores case.
-# As a hook it reads only the session's last assistant message from the payload's
-# transcript, only for a session whose cwd is this primary home, and never on a
-# stop_hook_active turn, so a reply is rewritten at most once. A finding prints
+# homework_phrases entry is flagged unless a homework_reporters word comes before
+# it in the same sentence, because "скаут не нашёл X" relays a worker's finding
+# rather than firstmate giving up on its own step; without the key the reporters
+# are the ones shown above. A reply whose last non-blank line ends with an
+# ask_endings entry is flagged too, because work the captain already chose is
+# started and reported, not asked about again. Matching ignores case.
+# As a hook it judges only the payload's last_assistant_message, never
+# transcript_path: Claude Code writes the transcript asynchronously, so at Stop it
+# can still end at the previous reply. A payload without that field is not
+# checked. The hook runs only for a session whose cwd is this primary home, and
+# never on a stop_hook_active turn, so a reply is rewritten at most once. A finding prints
 # {"decision":"block","reason":...}, which sends the reason back to the model;
 # everything else prints nothing. --text prints the findings and exits 1 on any.
 set -u
@@ -48,11 +53,7 @@ if [ "$MODE" = hook ]; then
   [ "$(printf '%s' "$INPUT" | jq -r '(.stop_hook_active // .stopHookActive // false) | tostring' 2>/dev/null)" = false ] || exit 0
   cwd=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
   [ -n "$cwd" ] && [ "$(cd "$cwd" 2>/dev/null && pwd -P)" = "$(cd "$FM_HOME" && pwd -P)" ] || exit 0
-  transcript=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
-  [ -f "$transcript" ] || exit 0
-  INPUT=$(jq -rs '[.[] | select(.type == "assistant")
-      | [.message.content[]? | select(.type == "text") | .text] | join("\n")
-      | select(length > 0)] | last // empty' "$transcript" 2>/dev/null)
+  INPUT=$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // empty | strings' 2>/dev/null)
   [ -n "$INPUT" ] || exit 0
 fi
 
@@ -67,7 +68,7 @@ if jq -e '.task_ids == true' "$RULES" >/dev/null 2>&1; then
 fi
 
 FINDINGS=$(printf '%s' "$INPUT" | RULES_JSON=$(cat "$RULES") TASK_IDS="$TASK_IDS" perl -CSDA -MJSON::PP -e '
-  use strict; use warnings;
+  use strict; use warnings; use utf8;
   my $r = JSON::PP->new->utf8->decode($ENV{RULES_JSON});
   my $text = do { local $/; <STDIN> };
   my @ids = map { qr/$_/i } @{ $r->{id_patterns} // [] };
@@ -85,9 +86,12 @@ FINDINGS=$(printf '%s' "$INPUT" | RULES_JSON=$(cat "$RULES") TASK_IDS="$TASK_IDS
     push @out, "\"$hit\" stands without plain words: name the work in the captain'"'"'s nouns beside it"
       if @words < $min;
   }
+  my $reporters = join "|", map { quotemeta } @{ $r->{homework_reporters} // ["скаут", "воркер", "scout", "worker"] };
+  my @sentences = split /[.!?;\n]+/, $text;
   for my $p (@{ $r->{homework_phrases} // [] }) {
+    my $own = grep { /^(.*?)\Q$p\E/i && !(length $reporters && $1 =~ /(?<!\w)(?:$reporters)(?!\w)/i) } @sentences;
     push @out, "\"$p\" hands firstmate'"'"'s own failure to the captain: solve it, or name the one action only the captain can take"
-      if index(lc $text, lc $p) >= 0;
+      if $own;
   }
   my ($last) = grep { /\S/ } reverse split /\n/, $text;
   $last //= "";
