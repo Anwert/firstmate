@@ -894,6 +894,10 @@ fi
 stage read-once
 section "READ-ONCE CONTRACT"
 cat <<'EOF'
+This digest's last line reads "The digest above is complete for this session
+start." If that line is not in what you can see, the harness cut the output
+short: read its saved full output whole, data/captain.md included, before the
+first reply, and say so if no saved output exists.
 Everything below is printed in full for this session start: every state/*.meta,
 a compact data/backlog.md listing, a bounded tail of every state/*.status,
 data/projects.md, data/secondmates.md, data/captain.md, data/captain-shared.md,

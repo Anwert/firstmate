@@ -1107,6 +1107,11 @@ EOF
     "the read-once contract does not void itself for a stage that never ran"
   assert_contains "$out" "The READ-ONCE CONTRACT" \
     "the closing reminder does not point back at the contract"
+  assert_contains "$out" 'This digest'"'"'s last line reads "The digest above is complete for this session' \
+    "the read-once contract does not name the closing line a cut digest loses"
+  [ "$(printf '%s\n' "$out" | grep -n '^The digest above is complete for this session start\.' | cut -d: -f1)" \
+    -gt "$(printf '%s\n' "$out" | grep -n '^NEXT STEP$' | cut -d: -f1)" ] \
+    || fail "the closing line the contract names is not printed after the last section"
 
   contract_count=$(printf '%s\n' "$out" | grep -c 'Do NOT re-read any of them')
   [ "$contract_count" -eq 1 ] \
