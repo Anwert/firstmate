@@ -32,6 +32,7 @@ fm_browser_tool() {
 fm_browser_rule_phrase() {
   local tool
   tool=$(fm_browser_tool "$1") || return 1
+  # shellcheck disable=SC2016  # backticks are literal brief text, not command substitution.
   case "$tool" in
     claude-in-chrome) printf '%s\n' 'the Claude in Chrome tools (`mcp__claude-in-chrome__*`, loaded with one ToolSearch) for browser operations, in your own new tab only' ;;
     *) printf '%s\n' "$tool for browser operations" ;;

@@ -2788,6 +2788,7 @@ test_claude_skill_overrides_malformed_file_refuses_before_endpoint_or_metadata()
 # An "$allow" list is expanded at launch against the user-scope skills installed
 # under the launch's Claude config root, so a skill added after the file was
 # written is hidden too; the task record keeps the unexpanded object.
+# shellcheck disable=SC2016  # "$allow" is a literal JSON key, never a shell expansion.
 test_claude_skill_overrides_allow_list_hides_every_other_installed_skill() {
   local rec id out status launch settings root
   id=skillovr-allow-z34
