@@ -1,0 +1,31 @@
+=== [fix] fm-watch.sh blob dde4101ec7fc0333ef0ffe5c89c32c1b79b0c4df bash=3.2.57(1)-release herdr=herdr 0.9.5
+/Users/f.krutakov/.no-mistakes/worktrees/2f9ab82a9f84/01M5P9JHEJWP0AY04JM7MPRS1H/bin/backends/herdr.sh: line 3910: printf: write error: Broken pipe
+/Users/f.krutakov/.no-mistakes/worktrees/2f9ab82a9f84/01M5P9JHEJWP0AY04JM7MPRS1H/bin/backends/herdr.sh: line 3911: printf: write error: Broken pipe
+lab session=fm-lab-nm-fix-73491-17287 pane=w1:p2 sock=/Users/f.krutakov/.config/herdr/sessions/fm-lab-nm-fix-73491-17287/herdr.sock
+--- S0: direct TERM to a watcher held in the real Herdr push-event wait (FM_POLL=15)
+run 1: watcher 74403 TERM->exit 0.43s; live lab readers after: 0; reader FIFO dirs: 0; .fm-event-wait dirs: 0
+run 2: watcher 79252 TERM->exit 0.50s; live lab readers after: 0; reader FIFO dirs: 0; .fm-event-wait dirs: 0
+WARN: W0 not in event wait
+/var/folders/g6/v24p6wdn297frr3brnsvjyfh0000gq/T//fm-live-driver/live.sh: line 62: kill: (83291) - No such process
+run 3: watcher 83291 TERM->exit 0.07s; live lab readers after: 0; reader FIFO dirs: 0; .fm-event-wait dirs: 0
+main handled+acked queue (seq=none); .watcher-down=acked:handling:83291.1792823977.GrxhEg
+--- S1: take-over while the owner's watcher is in the real Herdr push-event wait
+arm A: watcher: started pid=99315 (beacon fresh)
+main handled+acked queue (seq=none); .watcher-down=acked:handling:83291.1792823977.GrxhEg
+watcher W1=99315 in event wait; live readers=1; event-wait dirs: 1
+take-over arm B printed: watcher: started pid=4408 (beacon fresh)  (after 4.09s)
+W1 gone after 4.14s from take-over start
+ledger: reason=signal-exit reason=signal-exit reason=actionable-stale reason=signal-exit reason=taken-over 
+.watcher-down: acked:handling:83291.1792823977.GrxhEg
+new lock holder W2=4408; live readers now (expect only W2's, <=1)=1; reader FIFO dirs now=1
+--- S2: a real idle->blocked transition during the new watcher's event wait still wakes
+W2 exited 1.37s after the blocked report
+arm B output: watcher: started pid=4408 (beacon fresh)|/Users/f.krutakov/.no-mistakes/worktrees/2f9ab82a9f84/01M5P9JHEJWP0AY04JM7MPRS1H/bin/backends/herdr.sh: line 3910: printf: write error: Broken pipe|/Users/f.krutakov/.no-mistakes/worktrees/2f9ab82a9f84/01M5P9JHEJWP0AY04JM7MPRS1H/bin/backends/herdr.sh: line 3911: printf: write error: Broken pipe|stale: fm-lab-nm-fix-73491-17287:w1:p2 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)|
+wake queue: stale	fm-lab-nm-fix-73491-17287:w1:p2	stale: fm-lab-nm-fix-73491-17287:w1:p2 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)|
+event-wait dirs left: 0; leftover reader FIFO dirs: 0
+main handled+acked queue (seq=2); .watcher-down=acked:handling:4408.1792824031.K1Xavp
+--- S3: --stop while the watcher is in the event wait
+arm C: watcher: started pid=9239 (beacon fresh)
+--stop rc=0 in 0.67s: watcher: stopped pid=9239|
+W3 alive after stop: no; live readers: 0; event-wait dirs left: 0; reader FIFO dirs left: 0
+=== [fix] done

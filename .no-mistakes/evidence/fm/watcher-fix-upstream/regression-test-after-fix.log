@@ -1,0 +1,4 @@
+## target 85e5a8c (fix)
+ok - watch-arm: --take-over owns a fresh cycle from a watcher held in the push-event wait
+bash tests/.single-take-over.test.sh  2.77s user 6.16s system 66% cpu 13.440 total
+exit=0

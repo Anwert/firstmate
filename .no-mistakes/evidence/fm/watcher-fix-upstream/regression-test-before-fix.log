@@ -1,0 +1,4 @@
+## base 29c3e86 bin/fm-watch.sh + new test
+not ok - --take-over did not own a fresh cycle after a late stop: watcher: attached pid=79613 (beacon 12s)
+bash tests/.single-take-over.test.sh  2.29s user 5.26s system 40% cpu 18.750 total
+exit=1
