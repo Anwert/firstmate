@@ -11,10 +11,14 @@
 # the response body and then a final `HTTP <code>` line; it owns authentication.
 # Each step reads the transitions Jira offers from the current status and takes the
 # one into the target, else the one into the next status of `path` toward it; when
-# neither is offered it refuses and names what is. A target in `merged_required` is
-# refused until the merge request (--mr, else the issue's `mr_field`) reports merged
-# through `glab mr view`. After every move the exact `.fields.status.name` is read
-# back, because a status category such as Done can hide which status was reached.
+# neither is offered it refuses and names what is. A target that matches a `path`
+# status apart from case and spaces walks to that status, so "Test done" reaches
+# TestDone. A transition Jira rejects is refused with Jira's own error text, field
+# by field, so the caller sets a field the transition requires and reruns.
+# A target in `merged_required` is refused until the merge request (--mr, else
+# the issue's `mr_field`) reports merged through `glab mr view`. After every move
+# the exact `.fields.status.name` is read back, because a status category such as
+# Done can hide which status was reached.
 # --mr also writes that URL into the issue's `mr_field` before walking, unless the
 # field already holds it, and reads the field back.
 # Prints one `<key>: <mr_field> = <url>` line when it sets the field and one
@@ -52,18 +56,27 @@ jq -e '(.rest | type == "string") and ((.path // []) | type == "array")' "$SETTI
   || { echo "fm-jira-walk: $SETTINGS must name a rest command and a status path" >&2; exit 2; }
 REST=$(jq -r '.rest' "$SETTINGS")
 MR_FIELD=$(jq -r '.mr_field // empty' "$SETTINGS")
+TARGET=$(jq -r --arg t "$TARGET" '
+  def norm: ascii_downcase | gsub("\\s"; "");
+  ($t | norm) as $n | first((.path // [])[] | select(type == "string" and norm == $n)) // $t' "$SETTINGS")
 
-# Calls the rest command and leaves the body in REST_BODY, failing on a non-2xx code.
+# Calls the rest command and leaves the body in REST_BODY and the status line in
+# REST_CODE, returning 1 on a non-2xx code and refusing when the command fails.
 REST_BODY=
-rest_call() {  # <method> <api-path> [json-file]
-  local out code
+REST_CODE=
+rest_try() {  # <method> <api-path> [json-file]
+  local out
   out=$("$REST" "$@" 2>&1) || refuse "$1 $2 failed: ${out##*$'\n'}"
-  code=${out##*$'\n'}
+  REST_CODE=${out##*$'\n'}
   REST_BODY=${out%$'\n'*}
-  case "$code" in
+  case "$REST_CODE" in
     "HTTP 2"*) ;;
-    *) refuse "$1 $2 answered ${code:-nothing}: $(printf '%s' "$REST_BODY" | head -c 300)" ;;
+    *) return 1 ;;
   esac
+}
+
+rest_call() {  # <method> <api-path> [json-file]
+  rest_try "$@" || refuse "$1 $2 answered ${REST_CODE:-nothing}: $(printf '%s' "$REST_BODY" | head -c 300)"
 }
 
 linked_mr() {
@@ -118,7 +131,14 @@ while [ "$from" != "$TARGET" ]; do
   id=${pick%%$'\t'*}
   want=${pick#*$'\t'}
   jq -n --arg id "$id" '{transition: {id: $id}}' > "$TMP"
-  rest_call POST "/rest/api/3/issue/$KEY/transitions" "$TMP"
+  if ! rest_try POST "/rest/api/3/issue/$KEY/transitions" "$TMP"; then
+    fields=$(printf '%s' "$REST_BODY" | jq -r '(.errors // {}) | to_entries | map("\(.key): \(.value)") | join("; ")' 2>/dev/null)
+    general=$(printf '%s' "$REST_BODY" | jq -r '(.errorMessages // []) | join("; ")' 2>/dev/null)
+    [ -n "$fields$general" ] || general=$(printf '%s' "$REST_BODY" | head -c 300)
+    why="$KEY: Jira refused transition $id ($from -> $want), ${REST_CODE:-nothing}"
+    [ -z "$fields" ] || refuse "$why: $fields${general:+; $general}. Set or correct each named field on $KEY, then rerun this walk."
+    refuse "$why: ${general:-no error text}"
+  fi
   now=$(current_status)
   [ "$now" = "$want" ] || refuse "$KEY moved $from -> $want but reads back as ${now:-nothing}"
   printf '%s: %s -> %s\n' "$KEY" "$from" "$now"

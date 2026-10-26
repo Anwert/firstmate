@@ -9,7 +9,8 @@ TMP_ROOT=$(fm_test_tmproot fm-jira-walk)
 WALK_BIN="$ROOT/bin/fm-jira-walk.sh"
 
 # A fake Jira whose workflow is a line of statuses plus Resolved off TestDone. The
-# status lives in <home>/status; <home>/readback overrides what a read returns.
+# status lives in <home>/status; <home>/readback overrides what a read returns, and
+# <home>/require-field makes Ready for test demand a field the walk never sets.
 make_home() {  # <name> <start-status> [mr-state]
   local home="$TMP_ROOT/$1"
   mkdir -p "$home/config" "$home/bin"
@@ -32,6 +33,10 @@ case "\$1 \$2" in
     printf '{"transitions":%s}\nHTTP 200\n' "\$offered" ;;
   "POST /rest/api/3/issue/BACK-1/transitions")
     id=\$(jq -r .transition.id "\$3")
+    if [ "\$id" = 361 ] && [ -f "\$home/require-field" ]; then
+      printf '{"errorMessages":[],"errors":{"customfield_2":"Story Points is required."}}\nHTTP 400\n'
+      exit 0
+    fi
     case "\$id" in 361) s='Ready for test' ;; 371) s='In Testing' ;; 301) s=TestDone ;; 451) s=Resolved ;; esac
     printf '%s\n' "\$s" > "\$home/status"
     printf '\nHTTP 204\n' ;;
@@ -121,7 +126,34 @@ test_unreachable_target_and_wrong_readback_refuse() {
   pass "a target with no offered step, or a move that reads back wrong, is refused by name"
 }
 
+test_target_matches_the_path_ignoring_case_and_spaces() {
+  local home out
+  home=$(make_home spelled 'In Testing')
+  out=$(run_walk "$home" BACK-1 'test done' 2>&1) || fail "the walk to 'test done' failed: $out"
+  [ "$out" = 'BACK-1: In Testing -> TestDone' ] || fail "the walk to 'test done' took the wrong moves: $out"
+  out=$(run_walk "$home" BACK-1 'Test done' 2>&1) || fail "'Test done' at TestDone was refused: $out"
+  [ -z "$out" ] || fail "'Test done' at TestDone still moved: $out"
+  pass "a target matches a path status ignoring case and spaces"
+}
+
+test_required_field_refusal_names_jiras_error() {
+  local home out rc=0
+  home=$(make_home required 'Code review')
+  : > "$home/require-field"
+  out=$(run_walk "$home" BACK-1 TestDone 2>&1) || rc=$?
+  [ "$rc" -eq 1 ] || fail "a transition Jira rejected exited $rc: $out"
+  printf '%s' "$out" | grep -F 'BACK-1: Jira refused transition 361 (Code review -> Ready for test), HTTP 400: customfield_2: Story Points is required.' >/dev/null \
+    || fail "the refusal did not name the issue, the transition and Jira's error: $out"
+  printf '%s' "$out" | grep -F 'Set or correct each named field on BACK-1, then rerun' >/dev/null || fail "the refusal did not say to set the field and rerun: $out"
+  [ "$(cat "$home/status")" = 'Code review' ] || fail "a rejected transition still moved the issue"
+  rm "$home/require-field"
+  out=$(run_walk "$home" BACK-1 TestDone) || fail "the rerun after setting the field failed: $out"
+  pass "a transition Jira rejects for a required field is refused with Jira's own error text"
+}
+
 test_walks_each_adjacent_state_and_reads_it_back
+test_target_matches_the_path_ignoring_case_and_spaces
+test_required_field_refusal_names_jiras_error
 test_mr_flag_sets_the_mr_field
 test_resolved_waits_for_the_merge
 test_unreachable_target_and_wrong_readback_refuse
