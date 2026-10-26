@@ -692,6 +692,9 @@ IFS= read -r -d '' SHARED_NO_CD_RULE <<'EOF' || true
 EOF
 SHARED_NO_CD_RULE=${SHARED_NO_CD_RULE%$'\n'}
 
+# One shared string keeps the ship and scout coded-refusal rule identical.
+REFUSAL_RULE="   If a permission classifier refuses a tool call, never retry it and never describe the refusal, a token, or a login on a later command line: write the details to \`$DATA/$ID/blocker.md\` with your file tool, run \`$(shell_quote "$FM_ROOT/bin/fm-status.sh") $ID blocked <short-code>\`, and stop."
+
 if [ -n "$BASE_BRANCH" ]; then
   SETUP_BASE="You are in a disposable git worktree of $REPO, at a detached HEAD on a clean copy of its base branch.
 Base branch: $BASE_BRANCH"
@@ -734,7 +737,7 @@ The report is the only thing that survives, so anything worth keeping must be in
    copies that URL from your line rather than assembling one.
 $CREWMATE_PAUSE_INSTRUCTIONS
 5. If you hit the same obstacle twice, append \`blocked [at=<epoch>]: {why}\` and stop; firstmate will help.
-   If a permission classifier refuses a tool call, never retry it and never describe the refusal, a token, or a login on a later command line: write the details to \`$DATA/$ID/blocker.md\` with your file tool, run \`$(shell_quote "$FM_ROOT/bin/fm-status.sh") $ID blocked <short-code>\`, and stop.
+$REFUSAL_RULE
 6. If a decision belongs to a human (product choices, destructive actions),
    append \`needs-decision [at=<epoch>]: {summary of options}\` and stop. Firstmate will reply with the decision.
    A decision or blocker you opened stays open until a \`resolved\` line carrying its exact key lands; a later \`done:\` or \`working:\` line never closes it, even when the answer is what started that work.
@@ -819,6 +822,7 @@ $RULE1
    turn after it; continue the same stage until a defined \`done:\` gate under Definition of done.
 $CREWMATE_PAUSE_INSTRUCTIONS
 5. If you hit the same obstacle twice, append \`blocked [at=<epoch>]: {why}\` and stop; firstmate will help.
+$REFUSAL_RULE
 6. If a decision belongs above the implementation worker (product choices, destructive actions),
    append \`needs-decision [at=<epoch>]: {summary of options}\` and stop. Firstmate will reply with the decision.
 $ASK_USER_BLOCK

@@ -221,6 +221,25 @@ test_ship_modes_generate_clean_briefs() {
   pass "fm-brief.sh: no-mistakes/direct-PR/local-only briefs generate cleanly"
 }
 
+# Ship and scout scaffolds both tell a refused worker to report one coded status
+# line through fm-status.sh, so a refusal never lands as narrative in either.
+test_ship_and_scout_carry_the_coded_refusal_rule() {
+  local home id args brief
+  home="$TMP_ROOT/refusal-home"
+  write_registry "$home"
+  for id_args in "refusal-ship-a1:--mode local-only" "refusal-scout-a2:--scout"; do
+    id=${id_args%%:*}
+    args=${id_args#*:}
+    # shellcheck disable=SC2086 # args is a fixed flag list
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" some-proj $args >/dev/null 2>&1 \
+      || fail "$id: fm-brief.sh $args failed"
+    brief="$home/data/$id/brief.md"
+    assert_grep "fm-status.sh' $id blocked <short-code>" "$brief" "$id: brief lacks the coded refusal status command"
+    assert_grep "$home/data/$id/blocker.md" "$brief" "$id: brief lacks the refusal details file"
+  done
+  pass "fm-brief.sh: ship and scout briefs both carry the coded refusal status rule"
+}
+
 # config/browser-tool chooses the browser tool a home's briefs name; an absent
 # file keeps the chrome-devtools-axi wording, and an unrecognized value is
 # refused rather than falling back to the default.
@@ -1732,6 +1751,7 @@ test_script_parses
 test_no_heredoc_in_command_substitution
 test_help_includes_entire_header
 test_ship_modes_generate_clean_briefs
+test_ship_and_scout_carry_the_coded_refusal_rule
 test_forge_selection_renders_correct_cli
 test_home_browser_tool_renders_in_briefs
 test_forge_external_renders_the_review_rail
