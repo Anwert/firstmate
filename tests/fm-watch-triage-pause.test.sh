@@ -807,6 +807,33 @@ test_captain_in_pane_hold_absorbs_turn_ends() {
   pass "a hold naming the captain in the pane absorbs its turn-ends; other holds still surface them"
 }
 
+# A delivered worker whose PR is recorded is finished: its pane churn raises no
+# stale alarm while the PR waits, since the merge poll owns its next wake. A
+# steer after the done puts it back to work, so the next new screen alarms again.
+test_delivered_pr_awaiting_merge_stays_quiet() {
+  local dir state out capture wakes
+  command -v tasks-axi >/dev/null 2>&1 \
+    || { echo "skip: tasks-axi not found (delivered PR stale quiet)"; return 0; }
+  dir=$(make_hold_home delivered-pr 'done: PR https://example.invalid/pull/1 checks green' nohold) \
+    || fail "could not build a delivered-PR fixture"
+  state="$dir/state"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  printf 'pr=https://example.invalid/pull/1\n' >> "$state/held-merge.meta"
+  set_mtime "$(( $(date +%s) - 60 ))" "$state/held-merge.status"
+  printf '%s' "$(seen_sig "$state/held-merge.status")" > "$state/.seen-held-merge_status"
+  hold_watch_churn "$dir" "$out" "$capture" 'idle, redraw' 2 \
+    || fail "watcher exited on a delivered worker's pane churn: $(cat "$out")"
+  wakes=$(hold_stale_wakes "$state")
+  [ "$wakes" -eq 0 ] || fail "a delivered worker awaiting merge alarmed $wakes time(s)"
+
+  mkdir -p "$state/held-merge.inbox/handled"
+  printf 'address the review comments\n' > "$state/held-merge.inbox/handled/1.msg"
+  hold_watch_surface "$dir" "$out" "$capture" 'idle after the steer' \
+    || fail "a worker steered after its done lost its stale alarm"
+  wakes=$(hold_stale_wakes "$state")
+  [ "$wakes" -eq 1 ] || fail "a steered delivered worker produced $wakes wakes instead of one"
+  pass "a delivered worker awaiting its PR's merge stays quiet until it is steered again"
+}
+
 # The cadence marker may never outlive the wake it claims to record. Recording it
 # before publishing the durable wake turned a delayed alarm into a lost one: the
 # append fails, the watcher exits with nothing queued, and the next sighting
@@ -1541,6 +1568,7 @@ fm_test_run \
   test_stale_churn_without_a_captain_call_still_alarms \
   test_captain_in_pane_hold_silences_stale \
   test_captain_in_pane_hold_absorbs_turn_ends \
+  test_delivered_pr_awaiting_merge_stays_quiet \
   test_failed_wake_append_does_not_arm_the_captain_hold_throttle \
   test_reheld_captain_call_starts_its_own_resurface_window \
   test_secondmate_paused_resurfaces_in_normal_mode \

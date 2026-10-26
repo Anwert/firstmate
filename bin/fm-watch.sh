@@ -2839,6 +2839,26 @@ captain_in_pane() {  # <task>
   return 1
 }
 
+# A worker whose latest status is `done:` and whose PR is recorded (pr=, so the
+# merge poll is armed) has finished: its pane only redraws while the PR waits on
+# the captain or the team, and the merge poll owns its next wake. A steer sent
+# after that done (a newer steering-inbox record) puts the worker back to work,
+# so its stale alarms count again.
+delivered_awaiting_merge() {  # <task>
+  local task=$1 verb done_at newest f m
+  [ -n "$task" ] && [ -n "$(fm_meta_get "$STATE/$task.meta" pr)" ] || return 1
+  status_line_verb "$(last_status_line "$STATE/$task.status")" verb
+  [ "$verb" = "done" ] || return 1
+  done_at=$(stat_mtime "$STATE/$task.status") || return 1
+  newest=0
+  for f in "$(fm_task_inbox_dir "$STATE" "$task")"/*.msg "$(fm_task_inbox_handled_dir "$STATE" "$task")"/*.msg; do
+    [ -f "$f" ] || continue
+    m=$(stat_mtime "$f") || continue
+    [ "$m" -le "$newest" ] || newest=$m
+  done
+  [ "$newest" -lt "$done_at" ]
+}
+
 # A batch made only of bare turn-ends from panes under such a hold is the
 # captain and the worker talking, so each turn of that conversation is absorbed
 # instead of waking firstmate; a status append in the batch still surfaces.
@@ -4383,6 +4403,12 @@ EOF
               date +%s > "$ssf"
               clear_write_tracking "$key"
               triage_log "absorbed stale (provably working, overriding a stale captain-relevant status): $w"
+            elif delivered_awaiting_merge "$task"; then
+              printf '%s' "$h" > "$sf"
+              # Pre-cap shape kept the count here (keep-count contract).
+              wedge_episode_end "$key" 0 1
+              clear_write_tracking "$key"
+              triage_log "absorbed stale (delivered PR awaiting merge; the merge poll owns its next wake): $w"
             elif captain_call_stale_bound "$key" "$task"; then
               # The line is captain-relevant and stays so, but the backlog says
               # the captain already holds this work: further NEW pane hashes with
