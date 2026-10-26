@@ -1511,6 +1511,12 @@ On Claude, a spawn or relaunch whose flow requires a plugin skill (`<plugin>:<sk
 A finding recorded with `--steered` after firstmate steered the worker about it is not repeated for that spawn.
 The script's header owns the file's keys and the transcript selection.
 
+## Agent-facing text check (config/agent-text-check.json)
+
+The optional local, gitignored `config/agent-text-check.json` names a writing skill and the paths of text an agent will read, such as skills, `AGENTS.md`, playbooks, and briefs.
+With it, `bin/fm-agent-text-pretool-check.sh`, registered as a Claude PreToolUse hook in the home's own Claude settings, refuses the primary session's Write or Edit of a listed path until that session has invoked or read the skill.
+A home without the file is never checked, and the script's header owns the keys.
+
 ## Jira status walk (config/jira-walk.json)
 
 The optional local, gitignored `config/jira-walk.json` lets `bin/fm-jira-walk.sh <issue-key> <target-status>` move a Jira issue through the transitions Jira offers, one at a time along a configured status path, and read the exact status back after every move.
