@@ -11,7 +11,8 @@
 #    "homework_phrases": ["не нашёл", "дальше не стал", "не получилось"],
 #    "homework_reporters": ["скаут", "воркер", "scout", "worker"],
 #    "ask_endings": ["запускаю?", "делать?", "создавать?"],
-#    "back_reference_phrases": ["см. выше", "как я писал", "as I wrote above"]}
+#    "back_reference_phrases": ["см. выше", "как я писал", "as I wrote above"],
+#    "next_badge": {"prefix": "next ", "move_with": "config/captain-next.sh <task> <kind> <text>"}}
 # A line naming an identifier - a match of id_patterns, or with task_ids a task id
 # recorded in state/*.meta - is flagged when fewer than min_words plain words
 # remain on it once identifiers, URLs, and code spans are removed. A
@@ -23,7 +24,13 @@
 # started and reported, not asked about again. A reply containing a
 # back_reference_phrases entry is flagged, because the captain may read only
 # this reply: it repeats the essentials instead of pointing back at an earlier
-# message. Matching ignores case.
+# message. With next_badge, the reply's last non-blank line - its closing next
+# step - is flagged when it names a merge request URL or a recorded task other
+# than the one carrying the badge: the open captain hold in data/backlog.md whose
+# reason starts with `prefix` (the markdown backlog only, as config/captain-next.sh
+# writes it), that task's recorded pr=, and an MR its hold
+# reason names (as `!<number>` or by URL). The finding names
+# move_with, so the badge moves in the same turn. Matching ignores case.
 # As a hook it judges only the payload's last_assistant_message, never
 # transcript_path: Claude Code writes the transcript asynchronously, so at Stop it
 # can still end at the previous reply. A payload without that field is not
@@ -38,6 +45,7 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
+DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 RULES="$CONFIG/reply-check.json"
 
 MODE=hook
@@ -61,17 +69,32 @@ if [ "$MODE" = hook ]; then
   [ -n "$INPUT" ] || exit 0
 fi
 
-TASK_IDS=
-if jq -e '.task_ids == true' "$RULES" >/dev/null 2>&1; then
-  for meta in "$STATE"/*.meta; do
-    [ -f "$meta" ] || continue
-    meta=${meta##*/}
-    TASK_IDS="$TASK_IDS${meta%.meta}
+ALL_TASK_IDS=
+for meta in "$STATE"/*.meta; do
+  [ -f "$meta" ] || continue
+  meta=${meta##*/}
+  ALL_TASK_IDS="$ALL_TASK_IDS${meta%.meta}
 "
-  done
+done
+TASK_IDS=
+! jq -e '.task_ids == true' "$RULES" >/dev/null 2>&1 || TASK_IDS=$ALL_TASK_IDS
+
+BADGE_TASK=
+BADGE_REASON=
+BADGE_PR=
+BADGE_PREFIX=$(jq -r '.next_badge.prefix // empty' "$RULES" 2>/dev/null)
+if [ -n "$BADGE_PREFIX" ]; then
+  # shellcheck source=bin/fm-hold-reason-lib.sh
+  . "$SCRIPT_DIR/fm-hold-reason-lib.sh"
+  BADGE_ROW=$(fm_hold_reason_decode_stream markdown < "$DATA/backlog.md" 2>/dev/null \
+    | BADGE_PREFIX="$BADGE_PREFIX" perl -ne 'if (/^- \[ \] (\S+) - .*\(hold: "?(\Q$ENV{BADGE_PREFIX}\E.*?)"?\) \(hold-kind/) { print "$1\t$2\n"; exit }')
+  BADGE_TASK=${BADGE_ROW%%$'\t'*}
+  BADGE_REASON=${BADGE_ROW#*$'\t'}
+  [ -z "$BADGE_TASK" ] || BADGE_PR=$(sed -n 's/^pr=//p' "$STATE/$BADGE_TASK.meta" 2>/dev/null | head -1)
 fi
 
-FINDINGS=$(printf '%s' "$INPUT" | RULES_JSON=$(cat "$RULES") TASK_IDS="$TASK_IDS" perl -CSDA -MJSON::PP -e '
+FINDINGS=$(printf '%s' "$INPUT" | RULES_JSON=$(cat "$RULES") TASK_IDS="$TASK_IDS" \
+  BADGE_TASK="$BADGE_TASK" BADGE_REASON="$BADGE_REASON" BADGE_PR="$BADGE_PR" ALL_TASK_IDS="$ALL_TASK_IDS" perl -CSDA -MJSON::PP -e '
   use strict; use warnings; use utf8;
   my $r = JSON::PP->new->utf8->decode($ENV{RULES_JSON});
   my $text = do { local $/; <STDIN> };
@@ -98,7 +121,7 @@ FINDINGS=$(printf '%s' "$INPUT" | RULES_JSON=$(cat "$RULES") TASK_IDS="$TASK_IDS
       if $own;
   }
   for my $p (@{ $r->{back_reference_phrases} // [] }) {
-    if (index(lc $text, lc $p) >= 0) {
+    if ($text =~ /(?<!\p{L})\Q$p\E/i) {
       push @out, "\"$p\" points the captain back at an earlier message: repeat the essentials in this reply";
       last;
     }
@@ -109,6 +132,24 @@ FINDINGS=$(printf '%s' "$INPUT" | RULES_JSON=$(cat "$RULES") TASK_IDS="$TASK_IDS
   for my $p (@{ $r->{ask_endings} // [] }) {
     if (length($last) >= length($p) && lc(substr($last, -length($p))) eq lc $p) {
       push @out, "the reply ends by asking \"$p\": work the captain already chose is started in this reply and reported started; ask only a call nobody else can make, with options and a recommendation";
+      last;
+    }
+  }
+  if (my $badge = $r->{next_badge}) {
+    my @named = $last =~ m{(https?://\S*?/(?:-/)?(?:merge_requests|pull)/\d+)}g;
+    for my $id (grep { length } split /\n/, $ENV{ALL_TASK_IDS}) {
+      push @named, $id if $last =~ /(?<![\w.-])\Q$id\E(?![\w.-])/i;
+    }
+    for my $n (@named) {
+      my ($num) = $n =~ m{/(\d+)$};
+      my $on_badge = $n =~ m{^https?://}
+        ? ((length $ENV{BADGE_PR} && $n =~ /^\Q$ENV{BADGE_PR}\E(?!\d)/)
+           || (defined $num && $ENV{BADGE_REASON} =~ /(?<![\w\/])!\Q$num\E\b|\Q$n\E/))
+        : lc $n eq lc $ENV{BADGE_TASK};
+      next if $on_badge;
+      my $where = length $ENV{BADGE_TASK} ? "on $ENV{BADGE_TASK}" : "on no task";
+      my $move = $badge->{move_with} // "the badge command";
+      push @out, "the closing step points the captain at $n, but the next badge is $where: move it there with $move in this turn, or close on the badged work";
       last;
     }
   }

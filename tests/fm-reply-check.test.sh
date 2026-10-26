@@ -65,7 +65,44 @@ test_back_reference_is_flagged() {
     || fail "the back reference was not named: $out"
   out=$(printf 'Overdraft limit: option B, the migration stays out.\n' | check_text "$home") \
     || fail "a reply restating the essentials was flagged: $out"
+  out=$(printf 'Скаут описал раньше, как это чинится: вариант B.\n' | check_text "$home") \
+    || fail "a phrase inside a longer word was flagged: $out"
   pass "a reply that points the captain back at an earlier message is flagged, a restated one passes"
+}
+
+# A closing step that sends the captain to an MR or task other than the one with
+# the next badge is flagged, so the badge moves in the same turn.
+test_closing_step_must_point_at_the_badge() {
+  local home out rc=0 reason
+  home=$(make_home badge)
+  jq '. + {next_badge: {prefix: "next ", move_with: "captain-next.sh"}}' "$home/config/reply-check.json" > "$home/rules.json"
+  mv "$home/rules.json" "$home/config/reply-check.json"
+  : > "$home/state/other-task.meta"
+  printf 'pr=https://gitlab.example/g/p/-/merge_requests/7\n' > "$home/state/retro-fixes.meta"
+  reason=$(bash -c '. "$1"; fm_hold_reason_encode "next review: !9 and the fix diff"' _ "$ROOT/bin/fm-hold-reason-lib.sh")
+  mkdir -p "$home/data"
+  printf '## In flight\n\n- [ ] retro-fixes - the fixes (hold: %s) (hold-kind: captain)\n- [ ] other-task - more (hold: back review: x) (hold-kind: captain)\n' \
+    "$reason" > "$home/data/backlog.md"
+
+  out=$(printf 'Fix is up.\nYour review: https://gitlab.example/g/p/-/merge_requests/8\n' | check_text "$home") || rc=$?
+  [ "$rc" -eq 1 ] || fail "a closing step off the badge exited $rc: $out"
+  printf '%s\n' "$out" | grep -F 'points the captain at https://gitlab.example/g/p/-/merge_requests/8, but the next badge is on retro-fixes: move it there with captain-next.sh' >/dev/null \
+    || fail "the badge finding was not named: $out"
+  rc=0; out=$(printf 'Next, the pane of other-task needs your word.\n' | check_text "$home") || rc=$?
+  printf '%s\n' "$out" | grep -F 'points the captain at other-task' >/dev/null || fail "a task off the badge was not flagged: $out"
+  out=$(printf 'Your review: https://gitlab.example/g/p/-/merge_requests/7\n' | check_text "$home") \
+    || fail "the badge task's own MR was flagged: $out"
+  out=$(printf 'Then the second one: https://gitlab.example/g/p/-/merge_requests/9\n' | check_text "$home") \
+    || fail "an MR the badge hold names was flagged: $out"
+  rc=0; out=$(printf 'Your review: https://gitlab.example/g/p/-/merge_requests/77\n' | check_text "$home") || rc=$?
+  [ "$rc" -eq 1 ] || fail "an MR whose number only starts with the badge MR's passed: $out"
+  out=$(printf 'https://gitlab.example/g/p/-/merge_requests/8 is merged.\nNothing waits on you now.\n' | check_text "$home") \
+    || fail "an MR outside the closing line was flagged: $out"
+
+  printf '## In flight\n\n- [ ] retro-fixes - the fixes\n' > "$home/data/backlog.md"
+  rc=0; out=$(printf 'Your review: https://gitlab.example/g/p/-/merge_requests/7\n' | check_text "$home") || rc=$?
+  printf '%s\n' "$out" | grep -F 'the next badge is on no task' >/dev/null || fail "a closing step with no badge set was not flagged: $out"
+  pass "a closing step naming an MR or task off the next badge is flagged; the badged work passes"
 }
 
 test_homework_spares_a_relayed_worker_finding() {
@@ -110,3 +147,4 @@ test_text_mode_names_each_broken_rule
 test_homework_spares_a_relayed_worker_finding
 test_hook_blocks_only_the_primary_session_once
 test_back_reference_is_flagged
+test_closing_step_must_point_at_the_badge
