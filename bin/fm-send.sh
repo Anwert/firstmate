@@ -12,6 +12,11 @@
 # secondmate request delivers only marker and correlation bytes and leaves the
 # parent waiting on a reply to nothing. Text that talks to the worker about its
 # permission checks is refused the same way (bin/fm-worker-text-lib.sh).
+# A text steer to a local ship or scout worker first prints the last lines of
+# that worker's screen to stderr, read from the viewport where the backend has a
+# viewport read (it never scrolls an idle fullscreen agent), so firstmate sees
+# what the captain just said in that pane. An unreadable screen prints nothing
+# and never blocks the steer.
 # Special keys instead of text: fm-send.sh <target> --key Enter
 # Key support is backend-specific: tmux/herdr support Escape, Enter, and C-c;
 # Orca supports Enter and C-c only; T3 Code maps Escape and C-c to a native
@@ -586,6 +591,22 @@ if [ -n "$TARGET_SELECTOR" ] && [ -n "$TARGET_META" ] && [ "$(fm_meta_get "$TARG
   TARGET_TASK_ID=$(fm_send_id_from_meta "$TARGET_META")
 fi
 
+FM_SEND_SCREEN_LINES=20
+fm_send_print_worker_screen() {
+  local screen
+  [ -n "$TARGET_SELECTOR" ] && [ -n "$TARGET_META" ] && [ "$TARGET_BACKEND" != remote ] || return 0
+  case "$(fm_meta_get "$TARGET_META" kind)" in ship|scout) ;; *) return 0 ;; esac
+  if fm_backend_visible_capture_supported "$TARGET_BACKEND"; then
+    screen=$(fm_backend_visible_capture "$TARGET_BACKEND" "$T" "$EXPECTED_LABEL" 2>/dev/null) || return 0
+  else
+    screen=$(fm_backend_capture "$TARGET_BACKEND" "$T" 60 "$EXPECTED_LABEL" 2>/dev/null) || return 0
+  fi
+  screen=$(printf '%s\n' "$screen" | grep -v '^[[:space:]]*$' | tail -n "$FM_SEND_SCREEN_LINES")
+  [ -n "$screen" ] || return 0
+  printf 'worker screen before this steer (last %s lines; if the captain said something here, reconcile it with the steer):\n%s\n---\n' \
+    "$FM_SEND_SCREEN_LINES" "$screen" >&2
+}
+
 # Validate the answerer-closes request before any durable mutation or send: the
 # target must have a task ledger in THIS home, the send must carry an answer
 # message, and every named key must be open right now in that ledger per the
@@ -844,6 +865,7 @@ else
     echo "error: $(fm_worker_text_permission_refusal "the steer" "$PERMISSION_PHRASE")" >&2
     exit 1
   fi
+  fm_send_print_worker_screen
   if [ "$TARGET_BACKEND" = remote ]; then
     FM_SEND_REMOTE_BUDGET=${FM_SEND_REMOTE_BUDGET:-30}
     case "$FM_SEND_REMOTE_BUDGET" in

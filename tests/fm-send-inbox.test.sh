@@ -44,7 +44,8 @@ TMP_ROOT=$(cd "$TMP_ROOT" && pwd)
 
 # Stub tmux: logs literal typed text to FM_SEND_LOG and lets the submit and
 # composer paths reach clean verdicts. FM_FAKE_TMUX_COMPOSER=pending renders a
-# composer visibly holding text; FM_FAKE_TMUX_SEND_FAIL=1 fails send-keys.
+# composer visibly holding text; FM_FAKE_TMUX_SEND_FAIL=1 fails send-keys;
+# FM_FAKE_TMUX_SCREEN names a file rendered above the composer.
 make_stubs() { # <dir> -> echoes fakebin dir
   local dir=$1 fb="$1/fakebin"
   mkdir -p "$fb"
@@ -71,6 +72,7 @@ case "${1:-}" in
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
+    [ -z "${FM_FAKE_TMUX_SCREEN:-}" ] || cat "$FM_FAKE_TMUX_SCREEN"
     if [ "${FM_FAKE_TMUX_COMPOSER:-}" = pending ]; then
       printf '╭──────────────╮\n│ leftover txt │\n╰──────────────╯\n'
     else
@@ -482,6 +484,30 @@ test_permission_talk_refused() {
   pass "fm-send: a steer about the worker's permission checks refuses before recording; a config name does not"
 }
 
+# A steer to a ship or scout worker first shows firstmate the worker's screen,
+# where the captain may just have answered the same question; the steer is still
+# recorded. A secondmate target, whose nudges come from scripts, shows nothing.
+test_steer_prints_worker_screen_first() {
+  local dir err
+  dir=$(setup_case worker-screen)
+  err="$dir/send.err"
+  printf '> captain: take option B, skip the migration\n● Understood, switching to option B.\n' > "$dir/screen.txt"
+  run_send "$dir" "$err" FM_FAKE_TMUX_SCREEN="$dir/screen.txt" -- t1 "Use option A." \
+    || fail "a steer with a readable worker screen failed: $(cat "$err")"
+  assert_contains "$(cat "$err")" "worker screen before this steer" "the screen header was not printed"
+  assert_contains "$(cat "$err")" "> captain: take option B, skip the migration" "the captain's line on the screen was not printed"
+  [ -n "$(find "$dir/home/state/t1.inbox" -name '*.msg' 2>/dev/null)" ] || fail "the steer was not recorded after the screen print"
+
+  dir=$(setup_case worker-screen-secondmate)
+  err="$dir/send.err"
+  fm_write_secondmate_meta "$dir/home/state/domain.meta" "$dir/home" "sess:fm-domain"
+  printf 'mate screen\n' > "$dir/screen.txt"
+  run_send "$dir" "$err" FM_FAKE_TMUX_SCREEN="$dir/screen.txt" -- fm-domain "Pick up the queue." \
+    || fail "a secondmate steer failed: $(cat "$err")"
+  assert_not_contains "$(cat "$err")" "worker screen before this steer" "a secondmate steer printed a worker screen"
+  pass "fm-send: a steer to a worker prints the worker's screen first and is still recorded"
+}
+
 test_empty_message_refused() {
   local dir err rc
   # The lived defect: an empty marked secondmate steer used to deliver a
@@ -544,3 +570,4 @@ test_meta_lock_contention_fails_bounded
 test_unwritable_inbox_fails_loudly
 test_empty_message_refused
 test_permission_talk_refused
+test_steer_prints_worker_screen_first
