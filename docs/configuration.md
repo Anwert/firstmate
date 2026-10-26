@@ -959,6 +959,7 @@ The flag is a home-local supervision-noise preference and is not inherited by se
 
 The optional local, gitignored `config/captain-in-pane-holds` file lists one captain-hold reason prefix per line, such as `next review:`, that this home uses to say the captain is working in that task's pane right now.
 While a task's open captain hold starts with a listed prefix, the watcher raises no stale alarm for its pane, first sight included, and its wedge timer absorbs the quiet the same way it does while the away-posture record exists.
+A batch of the worker's bare turn-ends under that hold is absorbed too, while a status append still surfaces.
 Any other hold keeps the ordinary first-sight alarm and `FM_PAUSE_RESURFACE_SECS` bound, and a home without the file spends no extra backlog read.
 `bin/fm-watch.sh`'s `captain_in_pane` owns the match.
 

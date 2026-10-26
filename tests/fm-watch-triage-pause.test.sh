@@ -778,6 +778,35 @@ test_captain_in_pane_hold_silences_stale() {
   pass "a hold naming the captain in the pane silences its stale alarms; other holds keep the first sight"
 }
 
+# The same hold also absorbs the bare turn-ends of that conversation: each turn
+# the worker ends while the captain talks to it would otherwise wake firstmate.
+# A hold whose reason is not listed surfaces the turn-end as before.
+test_captain_in_pane_hold_absorbs_turn_ends() {
+  local dir state out capture
+  command -v tasks-axi >/dev/null 2>&1 \
+    || { echo "skip: tasks-axi not found (captain-in-pane turn-end absorb)"; return 0; }
+  dir=$(make_hold_home in-pane-turn-end 'working: answering the captain' hold 'next grill: the requirements') \
+    || fail "could not build a captain-in-pane turn-end fixture"
+  state="$dir/state"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  printf 'next grill:\n' > "$dir/config/captain-in-pane-holds"
+  printf 'captain typing\n' > "$capture"
+  printf 'a' > "$state/held-merge.turn-ended"
+  hold_watch_launch "$dir" "$out" "$capture"
+  wait_for_absorbed "$state" "$HOLD_WATCH_PID" "absorbed benign signal: $state/held-merge.turn-ended" \
+    || { reap "$HOLD_WATCH_PID"; fail "a turn-end under a captain-in-pane hold was not absorbed: $(cat "$out")"; }
+  reap "$HOLD_WATCH_PID"
+  ! grep -F "$(printf '\tsignal\t')held-merge.turn-ended" "$state/.wake-queue" >/dev/null 2>&1 \
+    || fail "a turn-end under a captain-in-pane hold was queued as a wake"
+
+  printf 'next merge:\n' > "$dir/config/captain-in-pane-holds"
+  printf 'b' >> "$state/held-merge.turn-ended"
+  hold_watch_launch "$dir" "$out" "$capture"
+  wait_for_exit "$HOLD_WATCH_PID" 100 || { reap "$HOLD_WATCH_PID"; fail "a turn-end under an unlisted hold was absorbed"; }
+  grep -F "$(printf '\tsignal\t')held-merge.turn-ended" "$state/.wake-queue" >/dev/null \
+    || fail "a turn-end under an unlisted hold was not queued: $(cat "$out")"
+  pass "a hold naming the captain in the pane absorbs its turn-ends; other holds still surface them"
+}
+
 # The cadence marker may never outlive the wake it claims to record. Recording it
 # before publishing the durable wake turned a delayed alarm into a lost one: the
 # append fails, the watcher exits with nothing queued, and the next sighting
@@ -1511,6 +1540,7 @@ fm_test_run \
   test_open_captain_call_bounds_stale_churn \
   test_stale_churn_without_a_captain_call_still_alarms \
   test_captain_in_pane_hold_silences_stale \
+  test_captain_in_pane_hold_absorbs_turn_ends \
   test_failed_wake_append_does_not_arm_the_captain_hold_throttle \
   test_reheld_captain_call_starts_its_own_resurface_window \
   test_secondmate_paused_resurfaces_in_normal_mode \

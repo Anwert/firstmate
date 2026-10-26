@@ -279,3 +279,19 @@ archive_away_record() {  # <state>
   FM_HOME="$(dirname "$1")" FM_STATE_OVERRIDE="$1" "$ROOT/bin/fm-afk-contract.sh" archive >/dev/null 2>&1 \
     || fail "could not archive the away-posture record in $1"
 }
+
+# Wait until the watcher records an absorbed wake matching <needle> in its triage
+# log. 1 if the watcher exits first (i.e. it surfaced the wake instead), which is
+# exactly the unfixed behavior this case exists to catch. Polls the log rather
+# than a poll cycle so the assertion lands inside the FIRST poll, long before an
+# unchanging fixture pane could reach the stale backbone.
+wait_for_absorbed() {  # <state> <pid> <needle>
+  local state=$1 pid=$2 needle=$3 i=0
+  while [ "$i" -lt 100 ]; do
+    grep -Fq "$needle" "$state/.watch-triage.log" 2>/dev/null && return 0
+    kill -0 "$pid" 2>/dev/null || return 1
+    sleep 0.1
+    i=$((i + 1))
+  done
+  return 1
+}

@@ -2839,6 +2839,20 @@ captain_in_pane() {  # <task>
   return 1
 }
 
+# A batch made only of bare turn-ends from panes under such a hold is the
+# captain and the worker talking, so each turn of that conversation is absorbed
+# instead of waking firstmate; a status append in the batch still surfaces.
+signal_only_captain_pane_turnends() {  # <file> ...
+  local f base
+  [ "$#" -gt 0 ] || return 1
+  for f in "$@"; do
+    base=${f##*/}
+    case "$base" in *.turn-ended) ;; *) return 1 ;; esac
+    captain_in_pane "${base%.turn-ended}" || return 1
+  done
+  return 0
+}
+
 # The identity a re-surface throttle is bound to: the task's whole status-log
 # signature. Any new status event - a replacement wait, a fresh delivery, a
 # blocker - changes it and so starts its own window instead of inheriting the
@@ -4212,7 +4226,8 @@ EOF
     # bin/fm-supervise-daemon.sh).
     # shellcheck disable=SC2086  # same space-separated status-path list
     if afk_present || [ "$signal_actionable" -eq 0 ] \
-      || { ! signal_crew_provably_working $files && ! signal_turnend_panes_churned $files; }; then
+      || { ! signal_only_captain_pane_turnends $files && ! signal_crew_provably_working $files \
+        && ! signal_turnend_panes_churned $files; }; then
       while IFS=$(printf '\t') read -r sf sig f; do
         [ -n "$sf" ] || continue
         file_reason="$reason"
