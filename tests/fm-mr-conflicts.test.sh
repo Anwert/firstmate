@@ -70,7 +70,13 @@ test_uncomputed_github_mergeability_waits_for_the_next_poll() {
   out=$(run_conflicts "$home")
   [ "$out" = 'conflict: gh-task https://github.com/o/r/pull/9' ] \
     || fail "the conflict computed after an uncomputed read was not reported: $out"
-  pass "an uncomputed GitHub mergeability prints nothing until a later poll reads it"
+  printf '{"state":"OPEN","mergeable":"UNKNOWN"}\n' > "$home/gh"
+  out=$(run_conflicts "$home")
+  [ -z "$out" ] || fail "an uncomputed read of a reported conflict printed: $out"
+  printf '{"state":"OPEN","mergeable":"CONFLICTING"}\n' > "$home/gh"
+  out=$(run_conflicts "$home")
+  [ -z "$out" ] || fail "an unchanged conflict was reported again after an uncomputed read: $out"
+  pass "an uncomputed GitHub mergeability prints nothing and keeps a reported conflict reported once"
 }
 
 test_conflict_is_reported_once_and_again_after_clearing

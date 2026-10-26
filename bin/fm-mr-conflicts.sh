@@ -8,8 +8,7 @@
 # `conflict-check-blind: <task-id> <url>` once when it cannot be read. A GitHub
 # request whose mergeability is not computed yet prints nothing until a later poll.
 # A state/<task-id>.conflict-seen marker holds what was last reported and is cleared
-# when the request reads clean or not computed, so a conflict that returns is
-# reported again.
+# when the request reads clean again, so a conflict that returns is reported again.
 # Merged and closed requests are skipped. Prints nothing when nothing changed.
 # It is meant to run as a registered watcher check (state/<id>.check.sh), so
 # firstmate hears of a conflict and steers the owning worker before the captain
@@ -67,6 +66,7 @@ for meta in "$STATE"/*.meta; do
         printf 'conflict-check-blind: %s %s\n' "$task" "$url"
       fi
       ;;
+    pending) ;;
     *) rm -f "$marker" ;;
   esac
 done
