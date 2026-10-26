@@ -10,7 +10,8 @@
 #    "min_words": 3,
 #    "homework_phrases": ["не нашёл", "дальше не стал", "не получилось"],
 #    "homework_reporters": ["скаут", "воркер", "scout", "worker"],
-#    "ask_endings": ["запускаю?", "делать?", "создавать?"]}
+#    "ask_endings": ["запускаю?", "делать?", "создавать?"],
+#    "back_reference_phrases": ["см. выше", "как я писал", "as I wrote above"]}
 # A line naming an identifier - a match of id_patterns, or with task_ids a task id
 # recorded in state/*.meta - is flagged when fewer than min_words plain words
 # remain on it once identifiers, URLs, and code spans are removed. A
@@ -19,7 +20,10 @@
 # rather than firstmate giving up on its own step; without the key the reporters
 # are the ones shown above. A reply whose last non-blank line ends with an
 # ask_endings entry is flagged too, because work the captain already chose is
-# started and reported, not asked about again. Matching ignores case.
+# started and reported, not asked about again. A reply containing a
+# back_reference_phrases entry is flagged, because the captain may read only
+# this reply: it repeats the essentials instead of pointing back at an earlier
+# message. Matching ignores case.
 # As a hook it judges only the payload's last_assistant_message, never
 # transcript_path: Claude Code writes the transcript asynchronously, so at Stop it
 # can still end at the previous reply. A payload without that field is not
@@ -92,6 +96,12 @@ FINDINGS=$(printf '%s' "$INPUT" | RULES_JSON=$(cat "$RULES") TASK_IDS="$TASK_IDS
     my $own = grep { /^(.*?)\Q$p\E/i && !(length $reporters && $1 =~ /(?<!\w)(?:$reporters)(?!\w)/i) } @sentences;
     push @out, "\"$p\" hands firstmate'"'"'s own failure to the captain: solve it, or name the one action only the captain can take"
       if $own;
+  }
+  for my $p (@{ $r->{back_reference_phrases} // [] }) {
+    if (index(lc $text, lc $p) >= 0) {
+      push @out, "\"$p\" points the captain back at an earlier message: repeat the essentials in this reply";
+      last;
+    }
   }
   my ($last) = grep { /\S/ } reverse split /\n/, $text;
   $last //= "";

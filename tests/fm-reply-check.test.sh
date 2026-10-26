@@ -17,7 +17,8 @@ make_home() {
   : > "$home/state/retro-fixes.meta"
   cat > "$home/config/reply-check.json" <<'JSON'
 {"id_patterns": ["BACK-[0-9]+", "![0-9]+"], "task_ids": true, "min_words": 3,
- "homework_phrases": ["не нашёл", "дальше не стал"], "ask_endings": ["запускаю?", "делать?"]}
+ "homework_phrases": ["не нашёл", "дальше не стал"], "ask_endings": ["запускаю?", "делать?"],
+ "back_reference_phrases": ["см. выше", "я писал раньше", "as I wrote above"]}
 JSON
   printf '%s\n' "$home"
 }
@@ -53,6 +54,18 @@ test_text_mode_names_each_broken_rule() {
     || fail "a clean reply was flagged: $out"
   [ -z "$out" ] || fail "a clean reply printed: $out"
   pass "text mode names bare identifiers, homework, and a closing ask, and passes a clean reply"
+}
+
+test_back_reference_is_flagged() {
+  local home out rc=0
+  home=$(make_home backref)
+  out=$(printf 'Решение по оверлимиту - как Я ПИСАЛ РАНЬШЕ, вариант B.\n' | check_text "$home") || rc=$?
+  [ "$rc" -eq 1 ] || fail "a reply pointing back exited $rc: $out"
+  printf '%s\n' "$out" | grep -F '"я писал раньше" points the captain back at an earlier message' >/dev/null \
+    || fail "the back reference was not named: $out"
+  out=$(printf 'Overdraft limit: option B, the migration stays out.\n' | check_text "$home") \
+    || fail "a reply restating the essentials was flagged: $out"
+  pass "a reply that points the captain back at an earlier message is flagged, a restated one passes"
 }
 
 test_homework_spares_a_relayed_worker_finding() {
@@ -96,3 +109,4 @@ test_hook_blocks_only_the_primary_session_once() {
 test_text_mode_names_each_broken_rule
 test_homework_spares_a_relayed_worker_finding
 test_hook_blocks_only_the_primary_session_once
+test_back_reference_is_flagged
