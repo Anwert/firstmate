@@ -473,7 +473,7 @@ print_flow_check_section() {  # <snapshot>
     [ "$(cat "$STATE/$task.flow-checked" 2>/dev/null || true)" != "$FM_STATUS_SNAPSHOT_EVENT_ENDPOINT" ] || continue
     out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-flow-check.sh" "$task" 2>&1)
     if [ "$shown" -eq 0 ]; then
-      printf 'FLOW CHECK (a flow task reported done or a decision; read before relaying it):\n' || return 1
+      printf 'FLOW CHECK (a flow task reported done or a decision; read before relaying it; once you steer a worker about its findings, record them with bin/fm-flow-check.sh <task> --steered):\n' || return 1
     fi
     printf '%s\n' "$out" || return 1
     shown=$((shown + 1))

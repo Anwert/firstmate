@@ -43,7 +43,7 @@ write_session() {  # <file> <iso> <tool:arg>...
 run_check() {
   local home=$1
   FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_CONFIG_OVERRIDE="$home/config" \
-    FM_CLAUDE_PROJECTS_DIR="$home/projects" "$CHECK_BIN" task-x
+    FM_CLAUDE_PROJECTS_DIR="$home/projects" "$CHECK_BIN" task-x "${@:2}"
 }
 
 test_clean_flow_passes() {
@@ -75,6 +75,55 @@ test_drift_is_named_and_older_tasks_are_ignored() {
   pass "a drifted worker is named finding by finding, and an earlier task's session in the same slot is not read"
 }
 
+# The own flow reaches /implement by path, so reading a skill's SKILL.md (by Read
+# or by a shell command) counts as running it; a plugin skill matches its bare name.
+test_reading_a_required_skill_counts_as_running_it() {
+  local home dir out
+  home=$(make_home read)
+  printf '%s\n' '{"pstack":{"require_skills":["implement","review-pass","pstack:poteto-mode"]}}' > "$home/config/flow-checks.json"
+  dir=$(transcript_dir "$home")
+  write_session "$dir/a.jsonl" 2027-01-15T08:00:00Z Skill:review-pass
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/home/u/agent-kit/skills/implement/SKILL.md"}}]}}\n' >> "$dir/a.jsonl"
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"cat /plugins/pstack/skills/poteto-mode/SKILL.md | head"}}]}}\n' >> "$dir/a.jsonl"
+  out=$(run_check "$home") || fail "a worker that read its required skills by path was flagged: $out"
+  [ "$out" = 'FLOW task-x pstack: ok' ] || fail "unexpected verdict for skills read by path: $out"
+  rm "$dir/a.jsonl"
+  write_session "$dir/b.jsonl" 2027-01-15T08:00:00Z Skill:review-pass
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/home/u/agent-kit/skills/implement/README.md"}}]}}\n' >> "$dir/b.jsonl"
+  out=$(run_check "$home") && fail "a worker that never read implement's SKILL.md passed: $out"
+  printf '%s\n' "$out" | grep -Fx 'FLOW task-x pstack: never invoked required skill implement' >/dev/null \
+    || fail "the unread required skill was not named: $out"
+  pass "a required skill read by its SKILL.md path counts as run, and another file in its folder does not"
+}
+
+# A finding firstmate already steered is not repeated for the same spawn, a new
+# finding still is, and a relaunch (new spawn generation) reports it afresh.
+test_steered_findings_are_not_repeated() {
+  local home dir out rc=0
+  home=$(make_home steered)
+  dir=$(transcript_dir "$home")
+  write_session "$dir/a.jsonl" 2027-01-15T08:00:00Z Skill:pr
+  mkdir -p "$home/wt.slot/.audit"; : > "$home/wt.slot/.audit/task-x.todo.md"
+  out=$(run_check "$home" --steered) || rc=$?
+  [ "$rc" -eq 1 ] || fail "recording steered findings exited $rc instead of 1: $out"
+  printf '%s\n' "$out" | grep -Fx 'FLOW task-x pstack: never invoked required skill pstack:poteto-mode' >/dev/null \
+    || fail "--steered did not print the findings it records: $out"
+  rc=0; out=$(run_check "$home") || rc=$?
+  [ "$rc" -eq 0 ] || fail "a steered finding still failed the check ($rc): $out"
+  [ "$out" = 'FLOW task-x pstack: ok - 1 steered finding(s) not repeated' ] || fail "unexpected steered verdict: $out"
+  write_session "$dir/b.jsonl" 2027-01-15T08:10:00Z Skill:deslop
+  rc=0; out=$(run_check "$home") || rc=$?
+  [ "$rc" -eq 1 ] || fail "a new finding after a steer exited $rc instead of 1: $out"
+  printf '%s\n' "$out" | grep -Fx 'FLOW task-x pstack: invoked skill outside the flow: deslop' >/dev/null \
+    || fail "the new finding was not named: $out"
+  printf '%s\n' "$out" | grep -F 'never invoked required skill' >/dev/null && fail "the steered finding was repeated: $out"
+  sed -i.bak 's/^spawn_gen=.*/spawn_gen=s1800000100.1.1/' "$home/state/task-x.meta"
+  rc=0; out=$(run_check "$home") || rc=$?
+  printf '%s\n' "$out" | grep -Fx 'FLOW task-x pstack: never invoked required skill pstack:poteto-mode' >/dev/null \
+    || fail "a relaunched worker inherited the earlier spawn's steered findings: $out"
+  pass "a steered finding is recorded per spawn and not repeated, while new findings and relaunches still report"
+}
+
 test_unknown_cases_cannot_tell() {
   local home out rc=0
   home=$(make_home unknown)
@@ -96,7 +145,7 @@ test_drain_presents_the_flow_check_once_per_result() {
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_CONFIG_OVERRIDE="$home/config" \
     FM_CLAUDE_PROJECTS_DIR="$home/projects" "$ROOT/bin/fm-wake-drain.sh" 2>/dev/null) \
     || fail "the drain failed: $out"
-  printf '%s\n' "$out" | grep -Fx 'FLOW CHECK (a flow task reported done or a decision; read before relaying it):' >/dev/null \
+  printf '%s\n' "$out" | grep -F 'FLOW CHECK (a flow task reported done or a decision; read before relaying it;' >/dev/null \
     || fail "the drain did not present a flow check for a done flow task: $out"
   printf '%s\n' "$out" | grep -F 'FLOW task-x pstack: cannot tell' >/dev/null \
     || fail "the drain dropped the check's verdict: $out"
@@ -111,3 +160,5 @@ test_clean_flow_passes
 test_drift_is_named_and_older_tasks_are_ignored
 test_drain_presents_the_flow_check_once_per_result
 test_unknown_cases_cannot_tell
+test_reading_a_required_skill_counts_as_running_it
+test_steered_findings_are_not_repeated
