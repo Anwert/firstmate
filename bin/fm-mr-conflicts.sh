@@ -19,7 +19,8 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
-# Prints clean, conflict, closed, or blind for one request URL.
+# Prints clean, conflict, closed, pending, or blind for one request URL; pending
+# means GitHub has not computed mergeability yet and a later poll will.
 request_state() {  # <url>
   local url=$1 project number json
   case "$url" in
@@ -29,6 +30,7 @@ request_state() {  # <url>
         if .state != "OPEN" then "closed"
         elif .mergeable == "CONFLICTING" then "conflict"
         elif .mergeable == "MERGEABLE" then "clean"
+        elif .mergeable == "UNKNOWN" then "pending"
         else "blind" end' 2>/dev/null || echo blind
       ;;
     https://*/-/merge_requests/*)

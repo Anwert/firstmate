@@ -59,5 +59,20 @@ test_unreadable_request_is_reported_blind_and_merged_is_skipped() {
   pass "an unreadable request is reported blind, and a merged one is never a conflict"
 }
 
+test_uncomputed_github_mergeability_waits_for_the_next_poll() {
+  local home out
+  home=$(make_home pending)
+  printf '{"state":"opened","has_conflicts":false}\n' > "$home/gl"
+  printf '{"state":"OPEN","mergeable":"UNKNOWN"}\n' > "$home/gh"
+  out=$(run_conflicts "$home")
+  [ -z "$out" ] || fail "an uncomputed GitHub mergeability printed: $out"
+  printf '{"state":"OPEN","mergeable":"CONFLICTING"}\n' > "$home/gh"
+  out=$(run_conflicts "$home")
+  [ "$out" = 'conflict: gh-task https://github.com/o/r/pull/9' ] \
+    || fail "the conflict computed after an uncomputed read was not reported: $out"
+  pass "an uncomputed GitHub mergeability prints nothing until a later poll reads it"
+}
+
 test_conflict_is_reported_once_and_again_after_clearing
+test_uncomputed_github_mergeability_waits_for_the_next_poll
 test_unreadable_request_is_reported_blind_and_merged_is_skipped
