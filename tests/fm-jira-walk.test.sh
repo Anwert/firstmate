@@ -15,6 +15,7 @@ make_home() {  # <name> <start-status> [mr-state]
   mkdir -p "$home/config" "$home/bin"
   printf '%s\n' "$2" > "$home/status"
   printf '%s\n' "${3:-opened}" > "$home/mr-state"
+  printf '%s\n' https://gitlab.example/mr/1 > "$home/mr-link"
   cat > "$home/bin/rest" <<SH
 #!/usr/bin/env bash
 home='$home'
@@ -34,9 +35,13 @@ case "\$1 \$2" in
     case "\$id" in 361) s='Ready for test' ;; 371) s='In Testing' ;; 301) s=TestDone ;; 451) s=Resolved ;; esac
     printf '%s\n' "\$s" > "\$home/status"
     printf '\nHTTP 204\n' ;;
+  "PUT /rest/api/3/issue/BACK-1")
+    [ ! -f "\$home/link-sticks-not" ] && jq -r .fields.customfield_1 "\$3" > "\$home/mr-link"
+    printf 'put\n' >> "\$home/puts"
+    printf '\nHTTP 204\n' ;;
   GET\ /rest/api/3/issue/BACK-1*)
     [ ! -f "\$home/readback" ] || status=\$(cat "\$home/readback")
-    jq -nc --arg s "\$status" '{fields: {status: {name: \$s, statusCategory: {name: "Done"}}, customfield_1: "https://gitlab.example/mr/1"}}'
+    jq -nc --arg s "\$status" --arg m "\$(cat "\$home/mr-link")" '{fields: {status: {name: \$s, statusCategory: {name: "Done"}}, customfield_1: \$m}}'
     printf 'HTTP 200\n' ;;
   *) printf 'HTTP 404\n' ;;
 esac
@@ -68,6 +73,27 @@ BACK-1: In Testing -> TestDone" ] || fail "the walk took the wrong moves: $out"
   pass "an issue is walked through every adjacent state to its target"
 }
 
+# --mr writes the MR link into the issue's MR field once and reads it back; the
+# same link already there is left alone, and a field that does not take it refuses.
+test_mr_flag_sets_the_mr_field() {
+  local home out rc=0
+  home=$(make_home mrlink 'In Testing')
+  out=$(run_walk "$home" BACK-1 TestDone --mr https://gitlab.example/mr/2) || fail "the walk with --mr failed: $out"
+  [ "$(cat "$home/mr-link")" = https://gitlab.example/mr/2 ] || fail "--mr did not set the MR field"
+  printf '%s\n' "$out" | grep -Fx 'BACK-1: customfield_1 = https://gitlab.example/mr/2' >/dev/null \
+    || fail "setting the MR field was not reported: $out"
+  printf '%s\n' "$out" | grep -Fx 'BACK-1: In Testing -> TestDone' >/dev/null || fail "the walk did not run after the field: $out"
+  printf 'TestDone\n' > "$home/status"
+  out=$(run_walk "$home" BACK-1 TestDone --mr https://gitlab.example/mr/2) || fail "a repeat --mr failed: $out"
+  [ "$(wc -l < "$home/puts" | tr -d ' ')" = 1 ] || fail "a link already in the field was written again"
+  : > "$home/link-sticks-not"
+  out=$(run_walk "$home" BACK-1 TestDone --mr https://gitlab.example/mr/3 2>&1) || rc=$?
+  [ "$rc" -eq 1 ] || fail "an MR field that did not take the link exited $rc: $out"
+  printf '%s' "$out" | grep -F 'customfield_1 reads back as https://gitlab.example/mr/2, not https://gitlab.example/mr/3' >/dev/null \
+    || fail "the field readback mismatch was not named: $out"
+  pass "--mr sets the issue's MR field once, reads it back, and refuses when it does not stick"
+}
+
 test_resolved_waits_for_the_merge() {
   local home out rc=0
   home=$(make_home unmerged TestDone opened)
@@ -96,5 +122,6 @@ test_unreachable_target_and_wrong_readback_refuse() {
 }
 
 test_walks_each_adjacent_state_and_reads_it_back
+test_mr_flag_sets_the_mr_field
 test_resolved_waits_for_the_merge
 test_unreachable_target_and_wrong_readback_refuse
