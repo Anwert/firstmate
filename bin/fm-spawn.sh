@@ -1935,6 +1935,7 @@ spawn_abort_cleanup() {
       fi
     fi
   fi
+  spawn_release_slot_holders
   # A spawn that aborts after claiming its slot but before its record survives
   # must not leave a claim naming a task no record describes. The release is a
   # read-then-remove, so it runs only while the project lock that wrote the
@@ -2004,6 +2005,56 @@ spawn_abort_cleanup() {
   return "$status"
 }
 trap spawn_abort_cleanup EXIT
+
+# Treehouse counts a pool slot as free when no process runs under it, which is
+# also true of a slot whose task is paused with its worker gone, so the pool
+# would hand that task's copy to this spawn and the claim below would overwrite
+# its owner. While the project lock is held, every slot of this project that a
+# task record in any local home names gets a holder process for the length of
+# the allocation, so `treehouse get` passes it over; spawn_check_live_task_slot
+# then refuses a slot that still lands on one. Holders end once this spawn has
+# claimed its slot or aborts, and a killed spawn's outlive it by at most
+# SPAWN_SLOT_HOLD_SECS.
+SPAWN_SLOT_HOLD_SECS=300
+SPAWN_SLOT_HOLDER_PIDS=
+SPAWN_LIVE_TASK_SLOTS=
+spawn_hold_live_task_slots() {
+  local state meta wt slot
+  fm_local_firstmate_state_dirs "$STATE" || {
+    echo "error: cannot list the task records that may hold a Treehouse slot of $PROJ_ABS ($FM_LOCAL_FIRSTMATE_ERROR); refusing to take a slot that may be another task's" >&2
+    return 1
+  }
+  for state in "${FM_LOCAL_FIRSTMATE_STATES[@]}"; do
+    for meta in "$state"/*.meta; do
+      [ -f "$meta" ] && [ ! -L "$meta" ] || continue
+      wt=$(fm_meta_get "$meta" worktree)
+      [ -n "$wt" ] || continue
+      fm_treehouse_pool_slot "$PROJ_ABS" "$wt" || continue
+      slot=$(CDPATH='' cd -- "$wt" 2>/dev/null && pwd -P) || continue
+      ! printf '%s' "$SPAWN_LIVE_TASK_SLOTS" | grep -qxF "$slot" || continue
+      SPAWN_LIVE_TASK_SLOTS="$SPAWN_LIVE_TASK_SLOTS$slot	$(basename "$meta" .meta)
+"
+      (cd "$slot" && exec sleep "$SPAWN_SLOT_HOLD_SECS") </dev/null >/dev/null 2>&1 &
+      SPAWN_SLOT_HOLDER_PIDS="$SPAWN_SLOT_HOLDER_PIDS $!"
+    done
+  done
+}
+spawn_release_slot_holders() {
+  local pid
+  for pid in $SPAWN_SLOT_HOLDER_PIDS; do
+    kill "$pid" 2>/dev/null || true
+  done
+  SPAWN_SLOT_HOLDER_PIDS=
+}
+spawn_check_live_task_slot() {  # <worktree>
+  local slot owner
+  slot=$(CDPATH='' cd -- "$1" 2>/dev/null && pwd -P) || return 0
+  owner=$(printf '%s' "$SPAWN_LIVE_TASK_SLOTS" | awk -F '\t' -v s="$slot" '$1 == s { print $2; exit }')
+  [ -z "$owner" ] || {
+    echo "error: Treehouse handed $ID the pool slot $slot, which task $owner still records as its worktree; refusing to take another task's copy; $(spawn_endpoint_hint)" >&2
+    return 1
+  }
+}
 
 # One lock per live Herdr session/socket, shared across all homes. <session>
 # is required so secondmate and primary spawns serialize against the same
@@ -5303,11 +5354,13 @@ EOF
       # A durable lease (bin/fm-home-seed.sh's pattern): there is no pane to run
       # the interactive `treehouse get` in, and a slot a live T3 thread points at
       # must never be handed on while that thread could re-create it.
+      spawn_hold_live_task_slots || exit 1
       WT=$(cd "$PROJ_ABS" && treehouse get --lease --lease-holder "$ID") || {
         echo "error: treehouse get --lease failed to lease a worktree for $ID from $PROJ_ABS" >&2
         exit 1
       }
       [ -n "$WT" ] || { echo "error: treehouse get --lease did not report a worktree for $ID" >&2; exit 1; }
+      spawn_check_live_task_slot "$WT" || exit 1
       validate_spawn_worktree "treehouse get --lease" "$WT (leased to $ID; once inspected, release it with 'treehouse return --force $WT' from $PROJ_ABS)"
       T3CODE_LEASED=1
       freshen_spawn_worktree_base "$WT" "$BASE_BRANCH" "$PROJ_ABS" "$MODE" || {
@@ -5932,6 +5985,7 @@ elif [ "$RELAUNCH" -eq 1 ]; then
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # A t3code slot was leased and validated in its target branch above.
   if [ "$BACKEND" != t3code ]; then
+    spawn_hold_live_task_slots || exit 1
     spawn_send_text_line "$WT_TARGET" 'treehouse get'
 
     # Wait for the treehouse subshell: the pane's cwd moves from the project to the worktree.
@@ -5996,6 +6050,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
     else
       validate_spawn_worktree "treehouse get" "$T"
     fi
+    spawn_check_live_task_slot "$WT" || exit 1
   fi
 
   # Claim the pool slot for this task. The interactive `treehouse get` sent to
@@ -6017,6 +6072,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
     fi
     SPAWN_SLOT_CLAIMED=1
   fi
+  spawn_release_slot_holders
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$BACKEND" != t3code ]; then
   freshen_spawn_worktree_base "$WT" "$BASE_BRANCH" "$PROJ_ABS" "$MODE" || exit 1

@@ -1127,6 +1127,76 @@ test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot() {
   pass "fm-teardown: a pool slot claimed by another task is left alone while the task's own cleanup finishes"
 }
 
+# A task handed a slot that an earlier-spawned task still records (the pool read
+# that paused task's slot as free) holds the claim, but the slot is the earlier
+# task's: teardown finishes only its own cleanup, hands the claim back, and
+# touches nothing under the slot. A claimant spawned first still refuses.
+test_task_handed_an_earlier_tasks_slot_leaves_it_to_that_task() {
+  local dir id=late-scout owner=paused-owner worker rc
+  dir=$(make_case slot-taken-from-earlier)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" "spawn_gen=s200.1.1" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  fm_write_meta "$dir/home/state/$owner.meta" \
+    "window=firstmate:fm-$owner" "endpoint_task_id=$owner" "spawn_gen=s100.1.1" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship"
+  claim_pool_slot "$dir" "$id"
+  ( cd "$dir/worktree" && exec sleep 30 ) &
+  worker=$!
+
+  set +e
+  run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "teardown of a task handed an earlier task's slot failed: $(cat "$dir/stderr")"
+  kill -0 "$worker" 2>/dev/null || fail "teardown killed a process in the earlier task's slot"
+  assert_present "$dir/worktree/sentinel" "teardown reset the earlier task's slot"
+  assert_absent "$dir/home/state/$id.meta" "the late task's own record was not removed"
+  assert_present "$dir/home/state/$owner.meta" "the earlier task's record was removed"
+  assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=$owner" "the claim did not go back to the earlier task"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the earlier task's slot was returned to the pool: $(cat "$dir/runtime.log")"
+  assert_contains "$(cat "$dir/stderr")" "still records it" "the warning did not say why the slot was left"
+  kill "$worker" 2>/dev/null || true
+  wait "$worker" 2>/dev/null || true
+
+  dir=$(make_case slot-taken-by-a-ship)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" "spawn_gen=s200.1.1" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship"
+  fm_write_meta "$dir/home/state/$owner.meta" \
+    "window=firstmate:fm-$owner" "endpoint_task_id=$owner" "spawn_gen=s100.1.1" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship"
+  claim_pool_slot "$dir" "$id"
+  set +e
+  run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a ship that worked in an earlier task's slot was torn down records-only"
+  assert_present "$dir/home/state/$id.meta" "the refused ship teardown removed its record"
+  assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=$id" "the refused ship teardown moved the claim"
+
+  dir=$(make_case slot-claimant-spawned-first)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" "spawn_gen=s100.1.1" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  fm_write_meta "$dir/home/state/$owner.meta" \
+    "window=firstmate:fm-$owner" "endpoint_task_id=$owner" "spawn_gen=s200.1.1" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship"
+  claim_pool_slot "$dir" "$id"
+  set +e
+  run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "teardown proceeded while a later record named its claimed slot"
+  assert_contains "$(cat "$dir/stderr")" "is also task $owner's recorded worktree" "the refusal changed"
+  assert_present "$dir/home/state/$id.meta" "the refused teardown removed its record"
+  pass "fm-teardown: a scout handed an earlier task's slot cleans up its own records and leaves the slot to that task; a ship still refuses"
+}
+
 # A T3 task whose pool slot was reassigned still archives its own thread, but
 # T3's slot cleanup undoes a tracked Codex overlay, so only the slot's
 # ownership keeps it off the claimant's overlay.
@@ -1624,6 +1694,7 @@ test_reused_pool_slot_refuses_before_touching_the_other_task
 test_cross_home_pool_slot_collision_refuses
 test_sole_slot_record_still_tears_down
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot
+test_task_handed_an_earlier_tasks_slot_leaves_it_to_that_task
 test_reassigned_pool_slot_keeps_claimant_codex_overlay_on_t3
 test_stale_record_on_claimed_slot_retires_then_claimant_tears_down
 test_own_and_absent_slot_claims_still_tear_down

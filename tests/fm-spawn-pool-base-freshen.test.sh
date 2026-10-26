@@ -757,7 +757,9 @@ test_pool_slot_claim_follows_the_spawn_outcome() {
 # window is a file recording its stable id and the path its shell sits in; a
 # `treehouse get` typed into a window moves it into the lowest slot no live
 # window sits in, and a slot stays leased exactly while that window lives -
-# the process lease real Treehouse keeps for an interactive acquire.
+# the process lease real Treehouse keeps for an interactive acquire. Like real
+# Treehouse, it also passes over a slot some process is running in, unless
+# FM_FAKE_POOL_IGNORE_PROCESSES=1.
 install_pool_world_tmux() {  # <fakebin> <world-dir> <slot-root>
   local fakebin=$1 world=$2 slots=$3
   mkdir -p "$world"
@@ -816,6 +818,14 @@ case "$cmd" in
       w=$(window_name "$target")
       for slot in "$slots"/*/project; do
         grep -qxF -- "$slot" "$world"/*.path 2>/dev/null && continue
+        if [ "${FM_FAKE_POOL_IGNORE_PROCESSES:-0}" != 1 ]; then
+          real=$(cd "$slot" && pwd -P)
+          if [ -d /proc/self ]; then
+            for c in /proc/[0-9]*/cwd; do [ "$(readlink "$c" 2>/dev/null)" != "$real" ] || continue 2; done
+          else
+            lsof -a -d cwd -Fn 2>/dev/null | grep -qxF "n$real" && continue
+          fi
+        fi
         printf '%s\n' "$slot" > "$world/$w.path"
         break
       done
@@ -888,6 +898,61 @@ SH
   grep -Fxq -- "task=$other" "$claim2" || fail "slot 2 is not claimed by the second task: $(cat "$claim2" 2>/dev/null)"
   rm -rf "/tmp/fm-$id" "/tmp/fm-$other" "/tmp/fm-$id+"* "/tmp/fm-$other+"*
   pass "a launch refused after its slot claim leaves the pool for a retry and a second task"
+}
+
+# A paused task whose worker is gone has no process in its slot, which real
+# Treehouse reads as free. Spawn must pass that slot over for as long as a task
+# record names it, leave its claim to that task, and refuse rather than take it
+# should the pool still hand it out.
+test_slot_of_a_live_task_record_is_passed_over() {
+  local rec id out status slot_root world claim1 claim2 held
+  id='pool-live-record-r1'
+  rm -rf "/tmp/fm-$id"
+  rec=$(make_case live-record "$id")
+  read_case_record "$rec"
+  slot_root="$CASE_DIR/slots"
+  mkdir -p "$slot_root/1" "$slot_root/2"
+  git -C "$PROJECT_DIR" worktree move "$POOL_DIR" "$slot_root/1/project"
+  git -C "$PROJECT_DIR" worktree add --quiet --detach "$slot_root/2/project" "$INITIAL_SHA"
+  printf '{"worktrees":[{"name":"1","path":"%s"},{"name":"2","path":"%s"}]}\n' \
+    "$slot_root/1/project" "$slot_root/2/project" > "$slot_root/treehouse-state.json"
+  claim1="$slot_root/1/.fm-slot-owner"
+  claim2="$slot_root/2/.fm-slot-owner"
+  printf 'task=paused-owner\nhome=%s\n' "$HOME_DIR" > "$claim1"
+  printf 'kind=ship\nworktree=%s\nproject=%s\n' "$slot_root/1/project" "$PROJECT_DIR" > "$HOME_DIR/state/paused-owner.meta"
+  world="$CASE_DIR/tmux-world"
+  install_pool_world_tmux "$FAKEBIN_DIR" "$world" "$slot_root"
+
+  out=$(FM_FAKE_POOL_IGNORE_PROCESSES=1 run_spawn "$id" --harness codex --mode no-mistakes --yolo off)
+  status=$?
+  [ "$status" -ne 0 ] || fail "spawn took a slot a live task record still names: $out"
+  assert_contains "$out" "which task paused-owner still records as its worktree" "the refusal did not name the owner"$'\n'"$out"
+  [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "the refused spawn published a task record"
+  grep -Fxq 'task=paused-owner' "$claim1" || fail "the refused spawn overwrote the owner's claim: $(cat "$claim1")"
+
+  # A refused non-polytoken launch keeps its window for inspection; closing it
+  # frees slot 1 of every process, as the paused owner's own slot is.
+  rm -f "$world/fm-$id.id" "$world/fm-$id.path"
+  rm -rf "/tmp/fm-$id"
+  id='pool-live-record-r2'
+  fm_test_spawn_brief "$HOME_DIR" "$id"
+  out=$(run_spawn "$id" --harness codex --mode no-mistakes --yolo off)
+  status=$?
+  expect_code 0 "$status" "spawn beside a paused task's slot should launch"$'\n'"$out"
+  assert_grep "worktree=$slot_root/2/project" "$HOME_DIR/state/$id.meta" \
+    "spawn did not pass over the slot the paused task still records"
+  grep -Fxq 'task=paused-owner' "$claim1" || fail "spawn overwrote the paused task's claim: $(cat "$claim1")"
+  grep -Fxq -- "task=$id" "$claim2" || fail "slot 2 is not claimed by the new task: $(cat "$claim2" 2>/dev/null)"
+  held=$(cd "$slot_root/1/project" && pwd -P)
+  if [ -d /proc/self ]; then
+    for c in /proc/[0-9]*/cwd; do
+      [ "$(readlink "$c" 2>/dev/null)" != "$held" ] || fail "a slot holder outlived the spawn"
+    done
+  else
+    ! lsof -a -d cwd -Fn 2>/dev/null | grep -qxF "n$held" || fail "a slot holder outlived the spawn"
+  fi
+  rm -rf "/tmp/fm-$id" "/tmp/fm-$id+"* /tmp/fm-pool-live-record-r1
+  pass "a slot a live task record names is passed over, keeps its claim, and is refused if handed out"
 }
 
 # A refused polytoken launch removes its per-id paths only under the per-id
@@ -1381,6 +1446,7 @@ test_opt_in_still_refuses_an_unclean_slot_first() {
 test_remote_seeded_home_spawns_from_treehouse_pool
 test_pool_slot_claim_follows_the_spawn_outcome
 test_refused_launch_leaves_the_pool_for_a_retry_and_a_second_task
+test_slot_of_a_live_task_record_is_passed_over
 test_refused_launch_spares_per_id_paths_under_a_contended_spawn_lock
 test_non_polytoken_refused_launch_keeps_its_window
 test_treehouse_isolation_refusal_points_at_what_survives

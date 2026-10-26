@@ -155,6 +155,13 @@
 # absent claim - a slot taken before claims existed, or already returned - keeps
 # exactly the record-scan protection it had before, because refusing it would
 # strand every task in flight across that change on no evidence at all.
+# One collision is settled rather than refused: this scout claims the slot but
+# another record naming it as its worktree was spawned earlier, so the pool
+# handed this task a slot that task still held (it reads a paused task's slot as
+# free). The slot is the earlier task's: teardown hands the claim back to it and
+# finishes only this task's own cleanup, exactly as for a reassigned slot. A
+# ship in the same position keeps the refusal, since its copy may hold unlanded
+# work.
 # Why Treehouse's own state cannot answer this for crewmate slots, and why the
 # claim file sits on top of it, is owned by bin/fm-wake-lib.sh's slot-owner
 # claim comment.
@@ -2581,9 +2588,26 @@ collect_local_firstmate_states() {
   TREEHOUSE_OWNER_STATES=("${FM_LOCAL_FIRSTMATE_STATES[@]}")
 }
 
+# Spawn generation epoch of a task record, or nothing when it records none.
+record_spawn_epoch() {  # <meta>
+  local gen
+  gen=$(fm_meta_get "$1" spawn_gen)
+  gen=${gen#s}
+  gen=${gen%%.*}
+  case "$gen" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$gen"
+}
+
+# With <allow-taken> 1, returns TEARDOWN_SLOT_TAKEN_RC instead of refusing when
+# this record claims the slot but the other record naming it was spawned
+# earlier (the collision the header settles), leaving the earlier task in
+# TEARDOWN_SLOT_EARLIER_ID and TEARDOWN_SLOT_EARLIER_HOME.
+TEARDOWN_SLOT_TAKEN_RC=4
+TEARDOWN_SLOT_EARLIER_ID=
+TEARDOWN_SLOT_EARLIER_HOME=
 require_exclusive_worktree_slot_record() {
-  local record_meta=$1 record_id=$2 record_state=$3 worktree=$4
-  local slot state_dir other other_id field other_path other_slot
+  local record_meta=$1 record_id=$2 record_state=$3 worktree=$4 allow_taken=${5:-0}
+  local slot state_dir other other_id field other_path other_slot claimed=0 mine_at other_at
   slot=$(canonical_existing_dir "$worktree") || return 0
   # A slot whose owner claim names another task was reassigned, so this record's
   # teardown is records-only and touches nothing under it; another record naming
@@ -2591,6 +2615,7 @@ require_exclusive_worktree_slot_record() {
   # block the claimant's own teardown behind it.
   fm_treehouse_slot_owner_state "$slot" "$record_id"
   [ "$FM_TREEHOUSE_SLOT_OWNER" != other ] || return 0
+  [ "$FM_TREEHOUSE_SLOT_OWNER" != mine ] || claimed=1
   collect_local_firstmate_states "$record_state" || return 1
   for state_dir in "${TREEHOUSE_OWNER_STATES[@]}"; do
     for other in "$state_dir"/*.meta; do
@@ -2606,6 +2631,13 @@ require_exclusive_worktree_slot_record() {
         [ -n "$other_path" ] || continue
         other_slot=$(canonical_existing_dir "$other_path") || continue
         [ "$other_slot" = "$slot" ] || continue
+        if [ "$allow_taken" = 1 ] && [ "$claimed" = 1 ] && [ "$field" = worktree ] \
+          && mine_at=$(record_spawn_epoch "$record_meta") && other_at=$(record_spawn_epoch "$other") \
+          && [ "$other_at" -lt "$mine_at" ]; then
+          TEARDOWN_SLOT_EARLIER_ID=$other_id
+          TEARDOWN_SLOT_EARLIER_HOME=$(dirname "$state_dir")
+          return "$TEARDOWN_SLOT_TAKEN_RC"
+        fi
         echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
         echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
         echo "Reconcile whichever record is wrong (bin/fm-crew-state.sh $record_id; bin/fm-crew-state.sh $other_id), then re-run teardown." >&2
@@ -2616,9 +2648,20 @@ require_exclusive_worktree_slot_record() {
 }
 
 require_exclusive_task_worktree_slot() {
-  local slot
+  local slot rc=0
   slot=$(teardown_live_slot_path) || return 0
-  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot"
+  # Only a scout's copy is declared scratch; a ship that worked in the slot
+  # keeps the refusal so its unlanded work is never left to nobody.
+  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" "$([ "$KIND" = scout ] && echo 1 || echo 0)" || rc=$?
+  [ "$rc" = "$TEARDOWN_SLOT_TAKEN_RC" ] || return "$rc"
+  echo "warning: task $ID was handed pool slot $slot while task $TEARDOWN_SLOT_EARLIER_ID, spawned earlier, still records it; the slot is $TEARDOWN_SLOT_EARLIER_ID's, so its processes and copy are left untouched, its claim goes back to $TEARDOWN_SLOT_EARLIER_ID, and only $ID's own cleanup runs." >&2
+  fm_treehouse_slot_owner_claim "$slot" "$TEARDOWN_SLOT_EARLIER_ID" "$TEARDOWN_SLOT_EARLIER_HOME" || {
+    echo "REFUSED: could not hand pool slot $slot's claim back to task $TEARDOWN_SLOT_EARLIER_ID; nothing was changed. Inspect the claim file beside $slot, then re-run teardown." >&2
+    return 1
+  }
+  TEARDOWN_SLOT_REASSIGNED=1
+  TEARDOWN_SLOT_REASSIGNED_TO=$TEARDOWN_SLOT_EARLIER_ID
+  TEARDOWN_SLOT_REASSIGNED_HOME=$TEARDOWN_SLOT_EARLIER_HOME
 }
 
 # Positive slot ownership, read from the claim the task that took the slot wrote
@@ -2669,6 +2712,7 @@ TEARDOWN_SLOT_REASSIGNED_TO=
 TEARDOWN_SLOT_REASSIGNED_HOME=
 require_owned_task_worktree_slot() {
   local slot rc=0
+  [ "$TEARDOWN_SLOT_REASSIGNED" != 1 ] || return 0
   slot=$(teardown_live_slot_path) || return 0
   require_owned_worktree_slot_record "$ID" "$slot" || rc=$?
   case "$rc" in
