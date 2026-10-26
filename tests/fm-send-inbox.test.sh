@@ -459,6 +459,29 @@ test_unwritable_inbox_fails_loudly() {
   pass "fm-send inbox: an unwritable record is a loud local failure that leaves no false expectation"
 }
 
+# A steer that talks to the worker about its permission checks poisons the
+# worker's session, so it is refused before anything is recorded; a hyphenated
+# config name is code, not that talk, and still goes through.
+test_permission_talk_refused() {
+  local dir err rc
+  dir=$(setup_case permission-talk)
+  err="$dir/send.err"
+  run_send "$dir" "$err" -- t1 "The permission classifier refused your call; retry it now."
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a steer about the permission classifier should refuse"
+  assert_contains "$(cat "$err")" "about its permission checks ('permission classifier')" \
+    "the refusal should name the phrase"
+  assert_contains "$(cat "$err")" "Rewrite it to say only what to do and why" "the refusal should name the fix"
+  [ ! -d "$dir/home/state/t1.inbox" ] || fail "a refused steer still wrote an inbox record"
+  [ ! -s "$dir/send.log" ] || fail "a refused steer still typed something:"$'\n'"$(cat "$dir/send.log")"
+
+  dir=$(setup_case permission-config-name)
+  err="$dir/send.err"
+  run_send "$dir" "$err" -- t1 "Read config/claude-permission-mode before you change the launch." \
+    || fail "a steer naming a hyphenated config file was refused: $(cat "$err")"
+  pass "fm-send: a steer about the worker's permission checks refuses before recording; a config name does not"
+}
+
 test_empty_message_refused() {
   local dir err rc
   # The lived defect: an empty marked secondmate steer used to deliver a
@@ -520,3 +543,4 @@ test_post_enqueue_bookkeeping_failure_is_not_retryable
 test_meta_lock_contention_fails_bounded
 test_unwritable_inbox_fails_loudly
 test_empty_message_refused
+test_permission_talk_refused

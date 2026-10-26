@@ -153,6 +153,9 @@
 # regular file, or text carrying its own "Delivery contract: mode=" line (which
 # a later scout promotion could not outrank), stops the scaffold before
 # anything is written. Secondmate charters never take it.
+# The include, charter and scope text is refused when it talks to the worker about
+# its permission checks (bin/fm-worker-text-lib.sh); bin/fm-spawn.sh applies the
+# same check to the `# Task` section firstmate fills in after scaffolding.
 # Refuses to overwrite an existing brief.
 set -eu
 
@@ -180,6 +183,8 @@ esac
 . "$SCRIPT_DIR/fm-role-lib.sh"
 # shellcheck source=bin/fm-browser-tool-lib.sh
 . "$SCRIPT_DIR/fm-browser-tool-lib.sh"
+# shellcheck source=bin/fm-worker-text-lib.sh
+. "$SCRIPT_DIR/fm-worker-text-lib.sh"
 PAUSED_VERB=${FM_CLASSIFY_PAUSED_VERB:-$FM_CLASSIFY_PAUSED_VERB_DEFAULT}
 IFS= read -r -d '' CREWMATE_PAUSE_INSTRUCTIONS <<EOF || true
    Use \`$PAUSED_VERB: {why}\` - distinct from \`blocked:\` - when deliberately waiting for work or an external condition expected to clear on its own, including your own validation round.
@@ -429,6 +434,10 @@ if [ "$KIND" != secondmate ] && { [ -e "$BRIEF_INCLUDE_FILE" ] || [ -L "$BRIEF_I
     exit 1
   fi
   [ -n "$(printf '%s' "$BRIEF_INCLUDE_BODY" | tr -d '[:space:]')" ] || BRIEF_INCLUDE_BODY=
+  if PERMISSION_PHRASE=$(fm_worker_text_permission_talk "$BRIEF_INCLUDE_BODY"); then
+    echo "error: $(fm_worker_text_permission_refusal "$BRIEF_INCLUDE_FILE" "$PERMISSION_PHRASE")" >&2
+    exit 1
+  fi
 fi
 
 # Append the include as the last section of a ship or scout scaffold.
@@ -522,6 +531,11 @@ else
 fi
 SECONDMATE_CHARTER=${FM_SECONDMATE_CHARTER:-"{TASK}"}
 SECONDMATE_SCOPE=${FM_SECONDMATE_SCOPE:-${FM_SECONDMATE_CHARTER:-"{TASK}"}}
+if PERMISSION_PHRASE=$(fm_worker_text_permission_talk "$SECONDMATE_CHARTER
+$SECONDMATE_SCOPE"); then
+  echo "error: $(fm_worker_text_permission_refusal "the secondmate charter" "$PERMISSION_PHRASE")" >&2
+  exit 1
+fi
 if [ "$NO_PROJECTS" -eq 1 ]; then
   PROJECT_CLONES_BODY="None. This is a project-less domain: its subject is the firstmate repo this home lives in, so it needs no separate clones under \`projects/\`; its crews take pooled worktrees of that firstmate repo."
   PROJECT_CLONES_NOTE="This domain has no separate project clones: its subject is the firstmate repo this home lives in, and its crews take pooled worktrees of that repo."

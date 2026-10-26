@@ -10,7 +10,8 @@
 # The text must be nonempty: an empty or whitespace-only message is refused
 # before anything is marked, recorded, or submitted, because an empty marked
 # secondmate request delivers only marker and correlation bytes and leaves the
-# parent waiting on a reply to nothing.
+# parent waiting on a reply to nothing. Text that talks to the worker about its
+# permission checks is refused the same way (bin/fm-worker-text-lib.sh).
 # Special keys instead of text: fm-send.sh <target> --key Enter
 # Key support is backend-specific: tmux/herdr support Escape, Enter, and C-c;
 # Orca supports Enter and C-c only; T3 Code maps Escape and C-c to a native
@@ -265,6 +266,8 @@ fi
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-task-inbox-lib.sh
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
+# shellcheck source=bin/fm-worker-text-lib.sh
+. "$SCRIPT_DIR/fm-worker-text-lib.sh"
 
 FM_GUARD_CONTINUE_LINE='This is a supervision warning only; the requested message WILL still be sent.' "$SCRIPT_DIR/fm-guard.sh" || true
 
@@ -835,6 +838,10 @@ else
   MESSAGE=$*
   if [ -z "${MESSAGE//[[:space:]]/}" ]; then
     echo "error: a text steer requires a nonempty message; nothing was sent (an empty marked request would deliver only marker and correlation bytes and leave the parent waiting on a reply to nothing)" >&2
+    exit 1
+  fi
+  if PERMISSION_PHRASE=$(fm_worker_text_permission_talk "$MESSAGE"); then
+    echo "error: $(fm_worker_text_permission_refusal "the steer" "$PERMISSION_PHRASE")" >&2
     exit 1
   fi
   if [ "$TARGET_BACKEND" = remote ]; then

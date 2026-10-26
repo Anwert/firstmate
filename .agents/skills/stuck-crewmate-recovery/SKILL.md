@@ -30,6 +30,7 @@ A `backend=t3code` worker already runs at T3's `full-access` runtime mode, so th
 
 A session whose calls a permission classifier refused twice for the same kind of reason stays suspect to it, and later benign calls are refused too until the session is replaced.
 On the second such refusal in one worker, relaunch it through `bin/fm-control.sh <task-id> relaunch` rather than steering it to retry.
+Write its note as the plain task and progress; `bin/fm-control.sh` refuses a note that talks about the worker's permission checks.
 
 ## Session-start reconciliation for a dead ordinary direct report
 

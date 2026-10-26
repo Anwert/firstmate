@@ -240,6 +240,27 @@ test_ship_and_scout_carry_the_coded_refusal_rule() {
   pass "fm-brief.sh: ship and scout briefs both carry the coded refusal status rule"
 }
 
+# Text fm-brief writes for a worker - a home include or a secondmate charter -
+# is refused when it talks about the worker's permission checks.
+test_permission_talk_in_brief_inputs_is_refused() {
+  local home out status
+  home="$TMP_ROOT/permission-talk-home"
+  write_registry "$home"
+  mkdir -p "$home/config"
+  printf 'Ask firstmate for a bypass permissions launch when blocked.\n' > "$home/config/brief-include.md"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" perm-ship-a1 some-proj --mode local-only 2>&1); status=$?
+  [ "$status" -ne 0 ] || fail "an include about permission checks was scaffolded"
+  assert_contains "$out" "('bypass permissions')" "the include refusal did not name the phrase"
+  [ ! -e "$home/data/perm-ship-a1/brief.md" ] || fail "a refused include still wrote a brief"
+  rm "$home/config/brief-include.md"
+  out=$(FM_HOME="$home" FM_SECONDMATE_CHARTER='Own the jira lane; the auto mode classifier refuses jira writes.' \
+    "$ROOT/bin/fm-brief.sh" perm-mate --secondmate alpha 2>&1); status=$?
+  [ "$status" -ne 0 ] || fail "a charter about permission checks was scaffolded"
+  assert_contains "$out" "the secondmate charter talks to the worker about its permission checks" \
+    "the charter refusal did not name the charter"
+  pass "fm-brief.sh: an include or charter about the worker's permission checks is refused"
+}
+
 # config/browser-tool chooses the browser tool a home's briefs name; an absent
 # file keeps the chrome-devtools-axi wording, and an unrecognized value is
 # refused rather than falling back to the default.
@@ -1752,6 +1773,7 @@ test_no_heredoc_in_command_substitution
 test_help_includes_entire_header
 test_ship_modes_generate_clean_briefs
 test_ship_and_scout_carry_the_coded_refusal_rule
+test_permission_talk_in_brief_inputs_is_refused
 test_forge_selection_renders_correct_cli
 test_home_browser_tool_renders_in_briefs
 test_forge_external_renders_the_review_rail

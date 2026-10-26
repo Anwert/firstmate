@@ -29,7 +29,9 @@
 #   guessed posture. A
 #   ship or scout spawn also refuses leftover `{TASK}` / `{FIRSTMATE_SPEC}`
 #   placeholders, an empty Task, an incomplete pair of Task subsections, or a
-#   `## Captain's intent` line opening with a Captain label or address.
+#   `## Captain's intent` line opening with a Captain label or address, and a
+#   `# Task` section that talks to the worker about its permission checks
+#   (bin/fm-worker-text-lib.sh).
 #   When config/herdr-lifecycle-spawn-guard exists, a brief naming
 #   bin/fm-herdr-lab.sh or a listed Herdr session/server lifecycle command must
 #   carry the Herdr isolation contract emitted by bin/fm-brief.sh --herdr-lab;
@@ -947,6 +949,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-kimi-trust-lib.sh"
 # shellcheck source=bin/fm-control-lib.sh
 . "$SCRIPT_DIR/fm-control-lib.sh"
+# shellcheck source=bin/fm-worker-text-lib.sh
+. "$SCRIPT_DIR/fm-worker-text-lib.sh"
 # shellcheck source=bin/fm-gate-refuse-lib.sh
 . "$SCRIPT_DIR/fm-gate-refuse-lib.sh"
 # shellcheck source=bin/fm-busy-lib.sh
@@ -4190,6 +4194,10 @@ if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
   fi
   if ! fm_brief_task_content_valid "$BRIEF"; then
     echo "error: $BRIEF must contain nonempty ## Captain's intent and ## Firstmate spec subsections (or a nonempty legacy # Task body) before spawn" >&2
+    exit 1
+  fi
+  if PERMISSION_PHRASE=$(fm_worker_text_permission_talk "$(fm_brief_heading_body "$BRIEF" "# Task")"); then
+    echo "error: $(fm_worker_text_permission_refusal "$BRIEF's # Task section" "$PERMISSION_PHRASE")" >&2
     exit 1
   fi
   if ADDRESS_LINE=$(fm_brief_intent_address_line "$BRIEF"); then
