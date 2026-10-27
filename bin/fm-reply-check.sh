@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Claude Stop hook: when a captain-facing reply breaks the home's reply rules,
-# ask firstmate for a short follow-up that corrects only the flagged part. The
-# hook runs after the reply is on screen, so the follow-up never repeats it.
+# ask firstmate for a short follow-up, because the reply is already on screen.
 # Usage: fm-reply-check.sh            (Stop hook payload on stdin)
 #        fm-reply-check.sh --text      (a reply on stdin, for a manual check)
 #
@@ -38,9 +37,10 @@
 # checked. The hook runs only for a session whose cwd is this primary home, and
 # never on a stop_hook_active turn, so a reply draws at most one follow-up. A
 # finding prints {"decision":"block","reason":...}, which sends the reason back
-# to the model: it says the captain has already read the reply and asks for the
-# corrected sentence or the missing piece alone; everything else prints nothing.
-# --text prints the findings and exits 1 on any.
+# to the model: it says the captain has already read the reply, asks for the
+# corrected sentence or the missing piece alone, never a repeat of the reply,
+# and reads a finding's "this reply" as that follow-up; everything else prints
+# nothing. --text prints the findings and exits 1 on any.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -164,5 +164,5 @@ if [ "$MODE" = text ]; then
   printf '%s\n' "$FINDINGS"
   exit 1
 fi
-jq -n --arg r "The captain has already read this reply. Send a short follow-up with only the corrected sentence or the missing piece for each finding below, never a repeat of the reply:
+jq -n --arg r "The captain has already read this reply. Send a short follow-up with only the corrected sentence or the missing piece for each finding below, never a repeat of the reply. Where a finding says \"this reply\", it means that follow-up:
 $FINDINGS" '{decision: "block", reason: $r}'
