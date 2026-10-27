@@ -127,6 +127,8 @@ test_hook_blocks_only_the_primary_session_once() {
   out=$(run_hook "$home" "$home" false 'Готово: BACK-1. Делать?')
   printf '%s' "$out" | jq -e '.decision == "block" and (.reason | contains("делать?"))' >/dev/null \
     || fail "a breaking reply in the primary session was not sent back: $out"
+  printf '%s' "$out" | jq -e '.reason | contains("already read") and contains("never a repeat of the reply")' >/dev/null \
+    || fail "the block reason did not ask for a follow-up instead of a repeated reply: $out"
   out=$(run_hook "$home" "$home" true 'Готово: BACK-1. Делать?')
   [ -z "$out" ] || fail "a stop_hook_active turn was checked again: $out"
   out=$(run_hook "$home" "$TMP_ROOT" false 'Готово: BACK-1. Делать?')
@@ -140,7 +142,7 @@ test_hook_blocks_only_the_primary_session_once() {
   rm "$home/config/reply-check.json"
   out=$(run_hook "$home" "$home" false 'Готово: BACK-1. Делать?')
   [ -z "$out" ] || fail "a home without rules was checked: $out"
-  pass "the hook judges only this turn's final reply, sends it back once, only in the primary session, only where rules exist"
+  pass "the hook judges only this turn's final reply, asks once for a follow-up rather than a repeat, only in the primary session, only where rules exist"
 }
 
 test_text_mode_names_each_broken_rule
