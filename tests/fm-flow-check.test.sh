@@ -64,11 +64,11 @@ test_drift_is_named_and_older_tasks_are_ignored() {
   write_session "$dir/old.jsonl" 2020-01-01T00:00:00Z Skill:pstack:poteto-mode
   write_session "$dir/now.jsonl" 2027-01-15T08:00:00Z Skill:deslop Agent:opus-high
   mkdir -p "$dir/now/subagents"
-  write_session "$dir/now/subagents/s.jsonl" 2027-01-15T08:05:00Z Skill:finom:infra-test-stands
+  write_session "$dir/now/subagents/s.jsonl" 2027-01-15T08:05:00Z Skill:example:other-skill
   out=$(run_check "$home") || rc=$?
   [ "$rc" -eq 1 ] || fail "a drifted worker exited $rc instead of 1: $out"
   for want in 'never invoked required skill pstack:poteto-mode' 'invoked skill outside the flow: deslop' \
-    'invoked skill outside the flow: finom:infra-test-stands' 'spawned subagent outside the flow: opus-high' \
+    'invoked skill outside the flow: example:other-skill' 'spawned subagent outside the flow: opus-high' \
     'no todo list at .audit/task-x.todo.md'; do
     printf '%s\n' "$out" | grep -Fx "FLOW task-x pstack: $want" >/dev/null || fail "missing finding '$want' in: $out"
   done
