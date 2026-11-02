@@ -724,6 +724,7 @@ tests/fm-afk-contract.test.sh 11101
 tests/fm-afk-inject-e2e.test.sh 41958
 tests/fm-afk-pi-herdr-return-e2e.test.sh 52
 tests/fm-afk-return.test.sh 47380
+tests/fm-agent-text-pretool-check.test.sh 6000
 tests/fm-agy-harness.test.sh 50959
 tests/fm-agy-primary-live-e2e.test.sh 75
 tests/fm-agy-primary.test.sh 45000
@@ -795,6 +796,7 @@ tests/fm-extension-binding.test.sh 11105
 tests/fm-fleet-ledger.test.sh 19980
 tests/fm-fleet-snapshot-view.test.sh 23334
 tests/fm-fleet-sync.test.sh 40541
+tests/fm-flow-check.test.sh 18000
 tests/fm-forge-detect.test.sh 193
 tests/fm-fork-free-helpers.test.sh 746
 tests/fm-gate-refuse.test.sh 9953
@@ -820,6 +822,7 @@ tests/fm-host-mirror.test.sh 11587
 tests/fm-inactive-reconcile.test.sh 60823
 tests/fm-inbox.test.sh 6062
 tests/fm-jev-mem-guard.test.sh 336
+tests/fm-jira-walk.test.sh 19000
 tests/fm-kimi-harness.test.sh 58917
 tests/fm-kimi-trust-prompt-live-e2e.test.sh 60
 tests/fm-launch-prompt-signals-live-e2e.test.sh 50
@@ -829,6 +832,7 @@ tests/fm-live-lab-up-mate.test.sh 17363
 tests/fm-live-lab.test.sh 79639
 tests/fm-mail-check.test.sh 7524
 tests/fm-mail.test.sh 9684
+tests/fm-mr-conflicts.test.sh 10000
 tests/fm-muse-harness.test.sh 46548
 tests/fm-muse-signals-live-e2e.test.sh 52
 tests/fm-nm-test-contract.test.sh 853
@@ -876,6 +880,7 @@ tests/fm-remote-secondmate-parent-binding.test.sh 42294
 tests/fm-remote-secondmate-relaunch.test.sh 879
 tests/fm-remote-secondmate-trace-context.test.sh 74870
 tests/fm-remote-transport-lanes.test.sh 66089
+tests/fm-reply-check.test.sh 11000
 tests/fm-rovo-harness.test.sh 15691
 tests/fm-rovo-signals-live-e2e.test.sh 52
 tests/fm-secondmate-harness.test.sh 188187
@@ -908,6 +913,7 @@ tests/fm-spawn-worktree-settle.test.sh 9309
 tests/fm-startup-memory-budget.test.sh 8086
 tests/fm-startup-network.test.sh 72106
 tests/fm-stat-shadowing.test.sh 75
+tests/fm-status.test.sh 3000
 tests/fm-stow-cascade.test.sh 3058
 tests/fm-subagent-pretool-check.test.sh 998
 tests/fm-supervision-events.test.sh 673
